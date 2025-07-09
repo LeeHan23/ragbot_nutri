@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 gunicorn
 python-dotenv
+python-multipart
 
 # --- WhatsApp Integration ---
 twilio
