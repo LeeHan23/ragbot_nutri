@@ -1,9 +1,10 @@
 import os
+from typing import List
 from langchain.prompts import PromptTemplate
 
 # Import functions from other modules
 from vector_store import get_retriever
-from llm import get_llm_response
+from llm import get_llm_conversation # <-- IMPORT THE NEW FUNCTION
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,26 +12,29 @@ PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
 INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
 
 # --- Prompt Template Definition ---
-# This template structures the input for the language model, ensuring it has all
-# the necessary context (behavior, promos, retrieved info) to generate a relevant response.
+# This new template explicitly tells the AI to break its response into multiple,
+# short messages to simulate a natural conversation.
 RAG_PROMPT_TEMPLATE = """
-You are "Eva," a friendly and expert customer service assistant for a nutritionist company.
-Your personality and response style are strictly defined by the detailed instructions below. You must follow them precisely.
+You are "Eva," an expert wellness assistant. Your task is to have a natural, helpful conversation with the user.
 
-**BEHAVIOR AND PERSONA INSTRUCTIONS:**
+**CRITICAL INSTRUCTIONS:**
+1.  You MUST break your response down into a sequence of short, individual messages.
+2.  Your final output MUST be a JSON object containing a list of these messages, as per the format instructions.
+3.  Follow your detailed persona instructions precisely.
+
+**PERSONA AND BEHAVIOR INSTRUCTIONS:**
 {behavior_instructions}
 
 **ACTIVE PROMOTIONS/DISCOUNTS:**
 {promo_text}
 
-**CONTEXTUAL KNOWLEDGE BASE:**
-Use the following retrieved context to answer the user's question. This is your only source of truth for facts.
+**CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
 {retrieved_docs}
 
-**CUSTOMER INTERACTION:**
+**INTERACTION:**
 Customer Question: "{user_message}"
 
-Based on all the above, provide a comprehensive, natural, and helpful response that strictly follows your persona instructions.
+Now, based on all the above, generate the sequence of messages you will send to the user.
 """
 
 # Create a LangChain PromptTemplate object
@@ -42,21 +46,11 @@ rag_prompt = PromptTemplate(
 
 # --- Helper Function to Load Dynamic Content ---
 def _load_latest_text_file(directory: str, default_text: str = "Not available.") -> str:
-    """
-    Loads content from the most recently created/modified text file in a directory.
-
-    Args:
-        directory (str): The path to the directory containing text files.
-        default_text (str): The text to return if the directory is empty or doesn't exist.
-
-    Returns:
-        str: The content of the latest file, or the default text.
-    """
+    """Loads content from the most recently created/modified text file in a directory."""
     if not os.path.exists(directory) or not os.listdir(directory):
         return default_text
     
     try:
-        # Get all files and sort them by modification time (most recent first)
         files = [os.path.join(directory, f) for f in os.listdir(directory)]
         files.sort(key=os.path.getmtime, reverse=True)
         
@@ -69,46 +63,27 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
 
 
 # --- Main RAG Pipeline Function ---
-async def get_rag_response(user_message: str) -> str:
+async def get_rag_response(user_message: str) -> List[str]:
     """
-    Generates a response using the full RAG pipeline.
-
-    This function performs the following steps:
-    1. Retrieves relevant documents from the vector store.
-    2. Loads the latest behavioral instructions and promotional text.
-    3. Formats the complete prompt.
-    4. Calls the language model to get the final response.
-
-    Args:
-        user_message (str): The customer's question.
+    Generates a sequence of response messages using the RAG pipeline.
 
     Returns:
-        str: The generated response from the chatbot.
+        List[str]: A list of messages to be sent to the user.
     """
     print("--- Starting RAG Pipeline ---")
 
-    # 1. Retrieve relevant documents from the vector store
     try:
         retriever = get_retriever()
-        # The retriever finds documents in the vector store that are semantically
-        # similar to the user's message.
         retrieved_docs = retriever.invoke(user_message)
-        
-        # Format the retrieved documents into a single string
         retrieved_context = "\n\n".join([doc.page_content for doc in retrieved_docs])
-        print(f"Retrieved {len(retrieved_docs)} documents from vector store.")
+        print(f"Retrieved {len(retrieved_docs)} documents.")
     except Exception as e:
         print(f"Error during document retrieval: {e}")
         retrieved_context = "Could not retrieve context information."
 
-    # 2. Load dynamic content (instructions and promos)
     behavior_instructions = _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly and professional.")
     promo_text = _load_latest_text_file(PROMOS_PATH, "No active promotions at the moment.")
     
-    print(f"Loaded Instructions: {' '.join(behavior_instructions.split()[:10])}...")
-    print(f"Loaded Promotions: {' '.join(promo_text.split()[:10])}...")
-
-    # 3. Format the final prompt
     final_prompt = rag_prompt.format(
         behavior_instructions=behavior_instructions,
         promo_text=promo_text,
@@ -116,14 +91,11 @@ async def get_rag_response(user_message: str) -> str:
         user_message=user_message
     )
     
-    # print(f"--- Final Prompt ---\n{final_prompt}\n--------------------")
-
-    # 4. Get the response from the language model
     try:
-        final_response = await get_llm_response(final_prompt)
+        # Call the new function that returns a list of messages
+        message_list = await get_llm_conversation(final_prompt)
         print("--- RAG Pipeline Finished ---")
-        return final_response
+        return message_list
     except Exception as e:
         print(f"Error getting response from LLM: {e}")
-        # Provide a professional fallback response
-        return "I'm sorry, I'm having trouble connecting to my knowledge base right now. Please try again in a moment."
+        return ["I'm sorry, I'm having a little trouble thinking of a response right now. Please try asking in a different way."]

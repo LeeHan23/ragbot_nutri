@@ -1,11 +1,12 @@
 import os
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
+from typing import List
 from dotenv import load_dotenv
 
 # --- Load Environment Variables ---
-# This ensures the OpenAI API key is loaded securely from a .env file
 load_dotenv()
 
 # --- Validate Environment Variable ---
@@ -13,66 +14,64 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise EnvironmentError("OPENAI_API_KEY environment variable not found. Please set it in your .env file.")
 
+# --- Define the desired output structure ---
+# We want the LLM to return a JSON object with a single key "messages"
+# which contains a list of strings.
+class Conversation(BaseModel):
+    messages: List[str] = Field(description="A list of short, sequential messages to send to the user.")
+
 # --- Language Model Initialization ---
 def get_llm():
-    """
-    Initializes and returns the ChatOpenAI model instance.
-
-    This function configures the language model to be used for generating responses.
-    It defaults to 'gpt-3.5-turbo' for a balance of performance and cost,
-    but can be easily switched to 'gpt-4' or other models.
-
-    Returns:
-        An instance of ChatOpenAI.
-    """
+    """Initializes and returns the ChatOpenAI model instance."""
     try:
-        # For higher quality responses, you can change the model to "gpt-4-turbo" or "gpt-4"
         llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo",
-            temperature=0.7,  # Adjust for more creative or factual responses
+            # Using gpt-4 is recommended for better instruction following and JSON formatting
+            model_name="gpt-4-turbo", 
+            temperature=0.7,
             max_tokens=500,
-            openai_api_key=OPENAI_API_KEY
+            openai_api_key=OPENAI_API_KEY,
+            # Important: Enable JSON mode
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
         return llm
     except Exception as e:
         print(f"Error initializing ChatOpenAI model: {e}")
-        # This will prevent the application from starting if the LLM can't be initialized
         raise
 
 # --- Main LLM Interaction Function ---
-async def get_llm_response(prompt: str) -> str:
+async def get_llm_conversation(prompt: str) -> List[str]:
     """
-    Sends a prompt to the LLM and returns the generated response as a string.
+    Sends a prompt to the LLM and returns a list of conversational messages.
 
-    This function uses a simple chain: Prompt -> LLM -> String Output Parser.
+    This function uses a chain that forces the LLM to output a JSON object
+    matching the 'Conversation' model.
 
     Args:
-        prompt (str): The fully formatted prompt to be sent to the language model.
+        prompt (str): The fully formatted prompt.
 
     Returns:
-        str: The text response from the language model.
+        List[str]: A list of message strings from the language model.
     """
     try:
         llm = get_llm()
         
-        # Although our rag.py prepares a detailed string prompt,
-        # we still wrap it for the Chat model.
-        # This approach is simple and effective for this use case.
-        # For more complex chat histories, you would use a message list.
-        prompt_template = ChatPromptTemplate.from_template("{user_prompt}")
+        # Set up a parser + inject instructions into the prompt template.
+        parser = JsonOutputParser(pydantic_object=Conversation)
+
+        prompt_template = ChatPromptTemplate.from_template(
+            template="{user_prompt}\n\n{format_instructions}\n",
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
         
-        # Create a simple chain: prompt -> model -> output parser
-        chain = prompt_template | llm | StrOutputParser()
+        # Create a simple chain: prompt -> model -> JSON output parser
+        chain = prompt_template | llm | parser
         
-        print("Invoking LLM to generate response...")
-        # Asynchronously invoke the chain with the prompt
-        response = await chain.ainvoke({"user_prompt": prompt})
+        print("Invoking LLM to generate conversational messages...")
+        response_data = await chain.ainvoke({"user_prompt": prompt})
         
-        return response
+        # Extract the list of messages from the parsed data
+        return response_data.get("messages", ["I'm sorry, I had trouble generating a response."])
 
     except Exception as e:
         print(f"An error occurred while communicating with the LLM: {e}")
-        # The calling function in rag.py will handle this error and
-        # provide a user-friendly fallback message.
         raise
-
