@@ -1,6 +1,7 @@
 # --- FastAPI and Server ---
 fastapi
 uvicorn[standard]
+gunicorn
 python-dotenv
 
 # --- WhatsApp Integration ---
