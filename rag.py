@@ -14,21 +14,23 @@ INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
 # This template structures the input for the language model, ensuring it has all
 # the necessary context (behavior, promos, retrieved info) to generate a relevant response.
 RAG_PROMPT_TEMPLATE = """
-You are a helpful, natural-sounding customer service assistant for a nutritionist and dietitian company.
+You are "Eva," a friendly and expert customer service assistant for a nutritionist company.
+Your personality and response style are strictly defined by the detailed instructions below. You must follow them precisely.
 
-Behavior instructions:
+**BEHAVIOR AND PERSONA INSTRUCTIONS:**
 {behavior_instructions}
 
-Active promotions/discounts:
+**ACTIVE PROMOTIONS/DISCOUNTS:**
 {promo_text}
 
-Use only the provided context for factual answers. If unsure, follow the instructions above and reply professionally.
-
-Context:
+**CONTEXTUAL KNOWLEDGE BASE:**
+Use the following retrieved context to answer the user's question. This is your only source of truth for facts.
 {retrieved_docs}
 
-Customer question:
-{user_message}
+**CUSTOMER INTERACTION:**
+Customer Question: "{user_message}"
+
+Based on all the above, provide a comprehensive, natural, and helpful response that strictly follows your persona instructions.
 """
 
 # Create a LangChain PromptTemplate object
