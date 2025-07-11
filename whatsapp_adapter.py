@@ -1,11 +1,14 @@
 import os
+import re
 import asyncio
 from fastapi import APIRouter, Request, Response, HTTPException
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 from dotenv import load_dotenv
+from collections import defaultdict
+from typing import List, Tuple
 
-from rag import get_rag_response
+from rag import get_contextual_response
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -23,6 +26,12 @@ try:
 except Exception as e:
     print(f"Error initializing Twilio client: {e}")
     twilio_client = None
+
+# --- In-Memory Chat History Store ---
+# NOTE: This is a simple in-memory store. For production, you would replace
+# this with a persistent database like Redis or a simple file-based store
+# to prevent history from being lost on server restart.
+conversation_history = defaultdict(list)
 
 # --- FastAPI Router ---
 whatsapp_router = APIRouter()
@@ -49,8 +58,8 @@ def send_whatsapp_message(to_number: str, message_body: str):
 @whatsapp_router.post("/webhook")
 async def whatsapp_webhook(request: Request):
     """
-    Handles incoming WhatsApp messages from the Twilio webhook.
-    It gets a list of responses from the RAG pipeline and sends them sequentially.
+    Handles incoming WhatsApp messages, maintains conversation history,
+    and sends contextual replies.
     """
     try:
         form_data = await request.form()
@@ -62,21 +71,39 @@ async def whatsapp_webhook(request: Request):
 
         print(f"Received message from {sender_id}: '{user_message}'")
 
-        # --- Get a LIST of response messages from RAG Pipeline ---
-        bot_responses = await get_rag_response(user_message)
-        print(f"Generated {len(bot_responses)} sequential messages.")
+        # --- Retrieve user's chat history ---
+        history: List[Tuple[str, str]] = conversation_history[sender_id]
+        
+        # --- Get contextual response from the RAG chain ---
+        bot_response_text = await get_contextual_response(user_message, history)
+
+        # --- Split the response into multiple messages ---
+        # The AI is instructed to create short messages. We can split by newline.
+        bot_messages = [msg.strip() for msg in bot_response_text.split('\n') if msg.strip()]
+        if not bot_messages:
+             bot_messages = ["I'm not sure how to respond to that, could you ask in another way?"]
+
+
+        print(f"Generated {len(bot_messages)} sequential messages.")
 
         # --- Send Replies Sequentially ---
-        for i, message in enumerate(bot_responses):
+        for i, message in enumerate(bot_messages):
             send_whatsapp_message(to_number=sender_id, message_body=message)
-            # Add a small delay between messages to feel more natural, but not for the last one
-            if i < len(bot_responses) - 1:
-                await asyncio.sleep(1.5) # 1.5-second delay
+            if i < len(bot_messages) - 1:
+                await asyncio.sleep(1.5)
+
+        # --- Update the chat history ---
+        # Add the user's message and the full bot response to the history
+        conversation_history[sender_id].append((user_message, bot_response_text))
+        
+        # Optional: Limit history size to prevent it from growing too large
+        max_history_length = 10 # Keep last 5 pairs of interactions
+        if len(conversation_history[sender_id]) > max_history_length:
+            conversation_history[sender_id] = conversation_history[sender_id][-max_history_length:]
+
 
         return Response(status_code=200)
 
-    except HTTPException as http_exc:
-        raise http_exc
     except Exception as e:
         print(f"An unexpected error occurred in the webhook: {e}")
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
