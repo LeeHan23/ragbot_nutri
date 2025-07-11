@@ -16,38 +16,23 @@ INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
 # --- Prompt Templates ---
 
 # This template combines the persona, chat history, and retrieved context.
-# The chain will feed the chat history and the user's new question into this.
+# It has multiple input variables that will be populated.
 SYSTEM_PROMPT_TEMPLATE = """
-You are Eva, a warm and intelligent virtual wellness guide for NutriLife Wellness.
-Your job is to guide users as if you're having a friendly and insightful conversation.
-You specialize in health and nutrition services and always prioritize making users feel heard, safe, and respected.
+You are "Eva," a friendly and expert wellness assistant from NutriLife Wellness.
+Your personality and response style are strictly defined by the detailed instructions below.
+You must have a natural, back-and-forth conversation, breaking your response into short, individual messages.
+Use the chat history to understand the context of the conversation.
 
-Key Behaviors:
-- Never sound robotic. Always respond like a caring human.
-- Use emojis naturally to soften the tone (😊, 💡, 💬, 💰, ✨).
-- Break responses into short, 1-3 sentence chunks.
-- Ask follow-up questions instead of listing everything.
-- Use information from the documents to respond accurately and confidently.
-- If uncertain, respond with honesty and offer to connect the user with a dietitian.
+**PERSONA AND BEHAVIOR INSTRUCTIONS:**
+{behavior_instructions}
 
-ALWAYS end your messages with a friendly question to keep the conversation flowing.
-If a promo is valid and matches the situation, mention it naturally and encourage action.
-"""
+**ACTIVE PROMOTIONS/DISCOUNTS:**
+{promo_text}
 
-USER_PROMPT_TEMPLATE = """
-The user has asked: {query}
+**CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
+{context}
 
-Context from documents:
-{retrieved_docs}
-
-Your reply should:
-- Sound human, caring, and consultative
-- Be broken into short, warm replies
-- Include helpful follow-up questions
-- Mention promotions only if relevant
-- Use emojis and bold where needed
-
-Your response:
+Now, answer the user's question based on the chat history and the provided knowledge.
 """
 
 # This is a separate, simpler prompt used by the chain internally to condense
@@ -60,7 +45,6 @@ CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(
 # --- Helper Function to Load Dynamic Content ---
 def _load_latest_text_file(directory: str, default_text: str = "Not available.") -> str:
     """Loads content from the most recently created/modified text file in a directory."""
-    # (This function remains unchanged)
     if not os.path.exists(directory) or not os.listdir(directory):
         return default_text
     try:
@@ -82,18 +66,24 @@ def get_rag_conversation_chain():
     llm = get_llm()
     retriever = get_retriever()
     
-    # Load dynamic content once when creating the chain
+    # Load dynamic content
     behavior_instructions = _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly and professional.")
     promo_text = _load_latest_text_file(PROMOS_PATH, "No active promotions at the moment.")
 
-    # Inject the dynamic content into the system prompt
-    custom_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        behavior_instructions=behavior_instructions,
-        promo_text=promo_text,
-        context="{context}" # The {context} placeholder must be kept for the chain
+    # Define the final prompt template with all its expected input variables
+    final_docs_prompt = PromptTemplate(
+        template=SYSTEM_PROMPT_TEMPLATE,
+        input_variables=["context", "behavior_instructions", "promo_text"]
     )
-    
-    # The memory object that the chain will use to store the conversation
+
+    # Use the .partial() method to safely pre-fill parts of the prompt.
+    # This is the correct way to handle dynamic system prompts in a chain.
+    # It correctly preserves the remaining 'context' variable for the chain to use.
+    final_docs_prompt = final_docs_prompt.partial(
+        behavior_instructions=behavior_instructions,
+        promo_text=promo_text
+    )
+
     memory = ConversationBufferMemory(
         memory_key="chat_history",
         return_messages=True
@@ -105,7 +95,7 @@ def get_rag_conversation_chain():
         retriever=retriever,
         memory=memory,
         condense_question_prompt=CONDENSE_QUESTION_PROMPT,
-        combine_docs_chain_kwargs={"prompt": PromptTemplate.from_template(custom_system_prompt)}
+        combine_docs_chain_kwargs={"prompt": final_docs_prompt}
     )
     
     print("ConversationalRetrievalChain initialized.")
@@ -128,10 +118,6 @@ async def get_contextual_response(user_message: str, chat_history: List[Tuple[st
     """
     try:
         print("--- Invoking Conversational Chain ---")
-        # The chain automatically uses its internal memory, but we can also
-        # pass history if we were managing it externally. For simplicity,
-        # we'll let the chain's internal memory handle it.
-        # The 'question' key is what the chain expects.
         result = await rag_chain.ainvoke({"question": user_message, "chat_history": chat_history})
         return result["answer"]
     except Exception as e:
