@@ -4,10 +4,9 @@ from dotenv import load_dotenv
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
-from typing import List, Tuple, Dict, Any
+from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -36,18 +35,15 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
         return default_text
 
 # --- Main RAG Pipeline ---
-async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> str:
     """
-    Gets a contextual response and the source documents used to generate it.
-    
-    Returns:
-        A dictionary containing the 'answer' and the 'sources' (list of documents).
+    Gets a contextual response using a chain that is dynamically configured for a specific user.
     """
     try:
         print(f"--- Invoking LCEL Chain for user: {user_id} ---")
         
         llm = get_llm()
-        retriever = get_retriever(user_id) 
+        retriever = get_retriever(user_id)
 
         # 1. Prompt to rephrase a follow-up question
         contextualize_q_system_prompt = """Given a chat history and the latest user question \
@@ -67,19 +63,15 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
         )
 
         # 2. Main prompt to answer the question
-        behavior_instructions = _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly.")
-        promo_text = _load_latest_text_file(PROMOS_PATH, "No active promotions.")
-
-        system_prompt = f"""
+        system_prompt = """
         You are "Eva," an expert wellness assistant. Your goal is to have a personalized, stateful conversation.
         Your personality and response style are strictly defined by the detailed instructions below.
         You MUST have a natural, back-and-forth conversation, breaking your response into short, individual messages using newlines (\\n).
         Use the chat history to understand the context of the conversation and the user metadata to personalize your greeting and responses.
-        You MUST base your answer on the provided "CONTEXTUAL KNOWLEDGE BASE". If the context is empty, inform the user you don't have specific information on that topic.
 
         **USER METADATA (Your long-term memory of the user):**
-        - Visit Count: {user_data.get("visit_count", 1)}
-        - Summary of Past Interests: {user_data.get("intent_summary", "No interactions yet.")}
+        - Visit Count: {visit_count}
+        - Summary of Past Interests: {intent_summary}
 
         **PERSONA AND BEHAVIOR INSTRUCTIONS:**
         {behavior_instructions}
@@ -88,7 +80,7 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
         {promo_text}
 
         **CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
-        {{context}}
+        {context}
 
         Based on ALL of the above, provide a comprehensive, natural, and helpful response.
         """
@@ -103,34 +95,29 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        # --- MODIFIED: The chain now passes through the retrieved documents ('context') ---
+        # --- CORRECTED: Use RunnablePassthrough to correctly inject all variables ---
         rag_chain = (
             RunnablePassthrough.assign(
-                context=history_aware_retriever
+                context=history_aware_retriever,
             )
-            | question_answer_chain
+            | qa_prompt
+            | llm
         )
         
-        # Invoke the chain
+        # Invoke the chain with all necessary inputs
         result = await rag_chain.ainvoke({
             "input": user_message,
             "chat_history": user_data.get("chat_history", []),
+            "visit_count": user_data.get("visit_count", 1),
+            "intent_summary": user_data.get("intent_summary", "No interactions yet."),
+            "behavior_instructions": _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly."),
+            "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        # Return both the answer and the source documents
-        return {
-            "answer": result.get("answer", "I'm not sure how to respond to that."),
-            "sources": result.get("context", [])
-        }
+        return result.content
 
     except FileNotFoundError:
-        return {
-            "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
-            "sources": []
-        }
+        return "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!"
     except Exception as e:
         print(f"Error invoking conversational chain: {e}")
-        return {
-            "answer": "I'm sorry, I encountered an issue. Could you please rephrase?",
-            "sources": []
-        }
+        return "I'm sorry, I encountered an issue. Could you please rephrase?"
