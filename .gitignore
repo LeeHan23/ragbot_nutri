@@ -33,14 +33,15 @@ ENV/
 env.bak/
 venv.bak/
 
-# Vector Store Database
-# This should be rebuilt from source files using the /reindex endpoint
+# Vector Store Databases
+# These are generated at runtime and should not be in the repository
 chroma_db/
+vectorstore_base/
 
 # Runtime Data
-# This directory holds files uploaded by admins and should not be in version control.
-# The app creates the subdirectories if they don't exist.
-data/
+# Ignore the specific folders for user-uploaded content and sessions
+data/users/
+data/sessions/
 
 # Secrets - VERY IMPORTANT
 # This file contains your API keys and should never be committed.
@@ -55,5 +56,3 @@ data/
 # OS-specific files
 .DS_Store
 Thumbs.db
-
-vectorstore_base/
