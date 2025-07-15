@@ -9,7 +9,7 @@ load_dotenv()
 
 from rag import get_contextual_response
 from langchain_core.messages import HumanMessage, AIMessage
-# --- CORRECTED: Import from the renamed 'knowledge_manager.py' file ---
+# Import the function from our refactored script
 from knowledge_manager import build_user_database
 
 # --- Constants ---
@@ -61,9 +61,7 @@ with st.sidebar:
             st.warning("Please upload at least one .docx document.")
         else:
             with st.spinner("Building new knowledge base... This will replace any existing custom knowledge and may take several minutes."):
-                # Call the updated function to build a new DB from base + uploaded docs
                 build_user_database(user_id, uploaded_files, status_callback=st.write)
-                
             st.success("Training complete! Your bot is ready with the new knowledge.")
     
     if st.button("Reset to Foundational Knowledge"):
@@ -75,11 +73,9 @@ with st.sidebar:
                 user_db_path = os.path.join(USER_DB_PATH, user_id)
                 if os.path.exists(user_db_path):
                     shutil.rmtree(user_db_path)
-                
                 st.session_state.messages[user_id] = []
                 st.session_state.user_data[user_id]["chat_history"] = []
-
-            st.success(f"Custom knowledge for user '{user_id}' has been cleared. The bot will now use the foundational knowledge.")
+            st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
 
 # --- Main Chat Interface ---
 st.title("🤖 Personalized AI Chatbot")
@@ -88,10 +84,18 @@ st.caption("Your personal AI assistant. Upload documents in the sidebar to train
 if st.session_state.current_user_id:
     user_id = st.session_state.current_user_id
     
-    # The logic in rag.py now handles the fallback to the base DB automatically
+    user_db_path = os.path.join(USER_DB_PATH, user_id)
+    # The check for the base DB is now handled inside vector_store.py
+    
     for message in st.session_state.messages.get(user_id, []):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            # --- NEW: Display sources if they exist for an assistant message ---
+            if message["role"] == "assistant" and "sources" in message:
+                with st.expander("View Sources"):
+                    for source in message["sources"]:
+                        st.info(f"Source: {source.metadata.get('source', 'N/A')}")
+                        st.text(source.page_content)
 
     if prompt := st.chat_input("Ask me anything..."):
         st.session_state.messages[user_id].append({"role": "user", "content": prompt})
@@ -101,10 +105,28 @@ if st.session_state.current_user_id:
         with st.chat_message("assistant"):
             with st.spinner("Eva is thinking..."):
                 current_user_data = st.session_state.user_data[user_id]
-                response = asyncio.run(get_contextual_response(prompt, current_user_data, user_id))
-                st.write(response)
+                response_data = asyncio.run(get_contextual_response(prompt, current_user_data, user_id))
+                
+                response_text = response_data["answer"]
+                sources = response_data["sources"]
+                
+                st.write(response_text)
 
-        st.session_state.messages[user_id].append({"role": "assistant", "content": response})
-        current_user_data["chat_history"].extend([HumanMessage(content=prompt), AIMessage(content=response)])
+                # --- NEW: Display sources for the latest response ---
+                if sources:
+                    with st.expander("View Sources"):
+                        for source in sources:
+                            # Try to get a clean source name from metadata
+                            source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                            st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
+                            st.text(source.page_content)
+
+        # --- MODIFIED: Add the response and sources to the session state ---
+        st.session_state.messages[user_id].append({
+            "role": "assistant", 
+            "content": response_text,
+            "sources": sources
+        })
+        current_user_data["chat_history"].extend([HumanMessage(content=prompt), AIMessage(content=response_text)])
 else:
     st.info("Please enter a User ID in the sidebar to begin.")

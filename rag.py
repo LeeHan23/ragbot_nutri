@@ -36,15 +36,17 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
         return default_text
 
 # --- Main RAG Pipeline ---
-async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> str:
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Gets a contextual response using a chain that is dynamically configured for a specific user.
+    Gets a contextual response and the source documents used to generate it.
+    
+    Returns:
+        A dictionary containing the 'answer' and the 'sources' (list of documents).
     """
     try:
         print(f"--- Invoking LCEL Chain for user: {user_id} ---")
         
         llm = get_llm()
-        # Get the specific retriever for the current user
         retriever = get_retriever(user_id) 
 
         # 1. Prompt to rephrase a follow-up question
@@ -73,6 +75,7 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
         Your personality and response style are strictly defined by the detailed instructions below.
         You MUST have a natural, back-and-forth conversation, breaking your response into short, individual messages using newlines (\\n).
         Use the chat history to understand the context of the conversation and the user metadata to personalize your greeting and responses.
+        You MUST base your answer on the provided "CONTEXTUAL KNOWLEDGE BASE". If the context is empty, inform the user you don't have specific information on that topic.
 
         **USER METADATA (Your long-term memory of the user):**
         - Visit Count: {user_data.get("visit_count", 1)}
@@ -99,7 +102,14 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
         )
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        
+        # --- MODIFIED: The chain now passes through the retrieved documents ('context') ---
+        rag_chain = (
+            RunnablePassthrough.assign(
+                context=history_aware_retriever
+            )
+            | question_answer_chain
+        )
         
         # Invoke the chain
         result = await rag_chain.ainvoke({
@@ -107,10 +117,20 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "chat_history": user_data.get("chat_history", []),
         })
         
-        return result.get("answer", "I'm not sure how to respond to that.")
+        # Return both the answer and the source documents
+        return {
+            "answer": result.get("answer", "I'm not sure how to respond to that."),
+            "sources": result.get("context", [])
+        }
 
     except FileNotFoundError:
-        return "It looks like I don't have a knowledge base for you yet. Please run 'python create_database.py --user_id YOUR_USER_ID' to build it first!"
+        return {
+            "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
+            "sources": []
+        }
     except Exception as e:
         print(f"Error invoking conversational chain: {e}")
-        return "I'm sorry, I encountered an issue. Could you please rephrase?"
+        return {
+            "answer": "I'm sorry, I encountered an issue. Could you please rephrase?",
+            "sources": []
+        }
