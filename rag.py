@@ -93,22 +93,10 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             ]
         )
 
-        # This is the final chain that will answer the question
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        # --- CORRECTED: Use a more robust chain construction with RunnablePassthrough ---
-        # This ensures all variables are passed through correctly.
-        rag_chain = (
-            RunnablePassthrough.assign(
-                context=history_aware_retriever
-            ).assign(
-                visit_count=lambda x: x["visit_count"],
-                intent_summary=lambda x: x["intent_summary"],
-                behavior_instructions=lambda x: x["behavior_instructions"],
-                promo_text=lambda x: x["promo_text"],
-            )
-            | question_answer_chain
-        )
+        # --- CORRECTED: Use create_retrieval_chain to correctly pipe the components ---
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
         
         # Invoke the chain with all necessary inputs
         result = await rag_chain.ainvoke({
@@ -120,11 +108,10 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        # The 'result' is now the final string answer. We need to manually get the sources.
-        # For simplicity in this fix, we will not return sources, but this can be added back.
+        # The result is now a dictionary containing 'answer' and 'context'
         return {
-            "answer": result,
-            "sources": [] # Source attribution can be re-implemented if needed
+            "answer": result.get("answer", "I'm not sure how to respond to that."),
+            "sources": result.get("context", [])
         }
 
     except FileNotFoundError:

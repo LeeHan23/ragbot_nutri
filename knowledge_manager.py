@@ -13,17 +13,14 @@ from langchain_community.document_loaders import Docx2txtLoader
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Directory where the foundational PDF knowledge base is stored
-BASE_DB_PATH = os.path.join(BASE_DIR, "vectorstore_base")
 # Directory where the final user-specific databases are saved
 USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
-# The collection name is consistent across base and user DBs after copying
-COLLECTION_NAME = "base_knowledge" 
+COLLECTION_NAME = "user_knowledge"
 
 def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
-    Builds a user-specific knowledge base by copying the foundational DB
-    and augmenting it with the user's uploaded documents.
+    Builds a user-specific knowledge base containing ONLY the user's uploaded documents.
+    This is a much faster and more memory-efficient process.
     
     Args:
         user_id (str): The unique identifier for the user.
@@ -36,23 +33,16 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
 
     user_db_path = os.path.join(USER_DB_PATH, user_id)
     
-    if status_callback: status_callback(f"--- Starting knowledge build for user: {user_id} ---")
+    if status_callback: status_callback(f"--- Starting new custom build for user: {user_id} ---")
 
-    # 1. If user has an existing custom DB, clear it to start fresh.
+    # 1. Clear any existing custom database for this user to ensure a fresh start
     if os.path.exists(user_db_path):
         if status_callback: status_callback("Clearing old custom knowledge base...")
         shutil.rmtree(user_db_path)
 
-    # 2. Copy the foundational database to create the user's personal starting point
-    if status_callback: status_callback("Copying foundational knowledge...")
-    if not os.path.exists(BASE_DB_PATH):
-        if status_callback: status_callback("FATAL ERROR: Foundational knowledge base not found. Please run 'build_base_db.py' first.")
-        return
-    shutil.copytree(BASE_DB_PATH, user_db_path)
-
-    # 3. Load the user's newly uploaded documents
-    if status_callback: status_callback("Loading new user documents...")
-    all_new_docs = []
+    # 2. Load the user's newly uploaded documents
+    if status_callback: status_callback("Loading user documents...")
+    all_docs = []
     for file_obj in uploaded_docx_files:
         try:
             # Create a temporary path to load the document
@@ -63,7 +53,7 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
                 f.write(file_obj.getvalue())
             
             loader = Docx2txtLoader(temp_path)
-            all_new_docs.extend(loader.load())
+            all_docs.extend(loader.load())
             
             os.remove(temp_path) # Clean up the temporary file
             if not os.listdir(temp_dir):
@@ -72,36 +62,30 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
             if status_callback: status_callback(f"Error loading uploaded file {file_obj.name}: {e}")
             continue
 
-    if not all_new_docs:
-        if status_callback: status_callback("No new documents to process. User DB is now a copy of the base knowledge.")
+    if not all_docs:
+        if status_callback: status_callback("No documents found to process.")
         return
 
-    # 4. Split the new documents into chunks
+    # 3. Split all documents together
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(all_new_docs)
-    if status_callback: status_callback(f"Split new documents into {len(chunks)} chunks.")
+    chunks = text_splitter.split_documents(all_docs)
+    if status_callback: status_callback(f"Split documents into {len(chunks)} chunks.")
 
-    # 5. Add the new chunks to the user's copied database
+    # 4. Create the new user-specific database in a single, robust operation
     if chunks:
-        if status_callback: status_callback("Embedding new documents and adding to knowledge base...")
-        embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002")
+        if status_callback: status_callback("Embedding documents...")
+        embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002", max_retries=6, chunk_size=500)
         
-        # Load the user's new database
-        db = Chroma(
+        Chroma.from_documents(
+            documents=chunks,
+            embedding=embedding_function,
             persist_directory=user_db_path,
-            embedding_function=embedding_function,
-            collection_name=COLLECTION_NAME 
+            collection_name=COLLECTION_NAME
         )
         
-        # Add the new document chunks
-        db.add_documents(chunks)
-        db.persist() # Save the changes
-        
-        if status_callback: status_callback("✅ Training complete! Your bot is now augmented with the new knowledge.")
+        if status_callback: status_callback("✅ Training complete! Your custom knowledge base is ready.")
     else:
-        if status_callback: status_callback("No new content to add from uploaded files.")
+        if status_callback: status_callback("No content found in documents to train on.")
 
-# This part is for manual command-line testing
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build a user-specific knowledge base.")
     print("This script is primarily intended to be called from the UI.")
