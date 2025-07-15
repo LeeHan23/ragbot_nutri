@@ -78,8 +78,8 @@ def add_documents_to_user_db(user_id: str, list_of_doc_paths: list, status_callb
                 model_name="text-embedding-ada-002"
             )
 
-            # Get the existing collection for the user
-            collection = client.get_collection(
+            # --- CORRECTED: Use get_or_create_collection to prevent errors for new users ---
+            collection = client.get_or_create_collection(
                 name=COLLECTION_NAME, # This should be the user collection name
                 embedding_function=chroma_ef
             )
