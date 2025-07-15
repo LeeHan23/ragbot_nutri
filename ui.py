@@ -10,11 +10,10 @@ load_dotenv()
 from rag import get_contextual_response
 from langchain_core.messages import HumanMessage, AIMessage
 # Import the function from our refactored script
-from knowledge_manager import add_documents_to_user_db
+from create_database import build_user_database
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USER_KNOWLEDGE_DIR = os.path.join(BASE_DIR, "data", "users")
 USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 
 # --- Streamlit Page Configuration ---
@@ -48,49 +47,35 @@ with st.sidebar:
     st.divider()
 
     st.header("Train Your Bot")
-    # --- MODIFIED: Restrict uploads to .docx files only ---
     uploaded_files = st.file_uploader(
-        "Upload your .docx files here to add to the bot's knowledge",
+        "Upload your .docx files to create a new knowledge base",
         accept_multiple_files=True,
         type=['docx']
     )
 
-    # --- MODIFIED: Changed button text and logic ---
-    if st.button("Add Documents to Knowledge Base"):
+    if st.button("Build New Knowledge Base"):
         user_id = st.session_state.current_user_id
         if not user_id:
             st.error("Please start a user session first.")
         elif not uploaded_files:
             st.warning("Please upload at least one .docx document.")
         else:
-            with st.spinner("Processing and adding new knowledge..."):
-                user_knowledge_path = os.path.join(USER_KNOWLEDGE_DIR, user_id, "knowledge")
-                os.makedirs(user_knowledge_path, exist_ok=True)
-
-                saved_file_paths = []
-                for file in uploaded_files:
-                    file_path = os.path.join(user_knowledge_path, file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(file.getvalue())
-                    saved_file_paths.append(file_path)
-                    st.write(f"Saved file: {file.name}")
+            with st.spinner("Building new knowledge base... This will replace any existing custom knowledge and may take several minutes."):
+                # Call the updated function to build a new DB from base + uploaded docs
+                build_user_database(user_id, uploaded_files, status_callback=st.write)
                 
-                # Call the updated function to add documents to the user's DB
-                add_documents_to_user_db(user_id, saved_file_paths, status_callback=st.write)
-                
-            st.success("Training complete! Your bot has learned from the new documents.")
+            st.success("Training complete! Your bot is ready with the new knowledge.")
     
-    if st.button("Clear Custom Knowledge"):
+    if st.button("Reset to Foundational Knowledge"):
         user_id = st.session_state.current_user_id
         if not user_id:
             st.error("Please start a user session first.")
         else:
-            with st.spinner("Clearing custom knowledge base..."):
+            with st.spinner("Resetting knowledge base..."):
                 user_db_path = os.path.join(USER_DB_PATH, user_id)
                 if os.path.exists(user_db_path):
                     shutil.rmtree(user_db_path)
                 
-                # Also reset chat history for a fresh start with the base model
                 st.session_state.messages[user_id] = []
                 st.session_state.user_data[user_id]["chat_history"] = []
 
@@ -98,11 +83,12 @@ with st.sidebar:
 
 # --- Main Chat Interface ---
 st.title("🤖 Personalized AI Chatbot")
-st.caption("Your personal AI assistant. Add your own documents in the sidebar to customize its knowledge.")
+st.caption("Your personal AI assistant. Upload documents in the sidebar to train it.")
 
 if st.session_state.current_user_id:
     user_id = st.session_state.current_user_id
     
+    # The logic in rag.py now handles the fallback to the base DB automatically
     for message in st.session_state.messages.get(user_id, []):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])

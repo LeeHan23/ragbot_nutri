@@ -6,110 +6,112 @@ from dotenv import load_dotenv
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
-# LangChain imports for loading/splitting documents
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader
-
-# ChromaDB native client for writing and its embedding function helper
-import chromadb
-from chromadb.utils import embedding_functions as chroma_embedding_functions
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USER_KNOWLEDGE_DIR = os.path.join(BASE_DIR, "data", "users")
-BASE_DB_PATH = "vectorstore_base"
-USER_DB_PATH = "chroma_db"
+# Directory where the foundational PDFs are stored
+BASE_DOCS_DIR = os.path.join(BASE_DIR, "data", "base_documents")
+# Directory where the final user-specific databases are saved
+USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 COLLECTION_NAME = "user_knowledge"
 
-def add_documents_to_user_db(user_id: str, list_of_doc_paths: list, status_callback=None):
+# --- List of foundational PDF documents ---
+BASE_PDF_FILES = [
+    "FA-Buku-RNI.pdf",
+    "latest-01.Buku-MDG-2020_12Mac2024.pdf"
+]
+
+def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
-    Adds new documents to a user's specific knowledge base using the native ChromaDB client.
+    Builds a complete, user-specific knowledge base by combining foundational
+    PDFs with newly uploaded user documents. This replaces any existing DB for the user.
+    
+    Args:
+        user_id (str): The unique identifier for the user.
+        uploaded_docx_files (list): A list of uploaded file objects from Streamlit.
+        status_callback (function, optional): A function to call with status updates.
     """
     if not user_id:
         if status_callback: status_callback("Error: A User ID must be provided.")
         return
 
     user_db_path = os.path.join(USER_DB_PATH, user_id)
+    
+    if status_callback: status_callback(f"--- Starting fresh build for user: {user_id} ---")
 
-    # Step 1: Ensure the user has a starting database by copying the base
-    if not os.path.exists(user_db_path):
-        if status_callback: status_callback("Creating personal knowledge base for new user...")
-        if not os.path.exists(BASE_DB_PATH):
-            if status_callback: status_callback("Error: Foundational knowledge base not found.")
-            return
-        shutil.copytree(BASE_DB_PATH, user_db_path)
-        if status_callback: status_callback("Personal knowledge base created.")
+    # 1. Clear any existing database for this user to ensure a fresh start
+    if os.path.exists(user_db_path):
+        if status_callback: status_callback("Clearing old custom knowledge base...")
+        shutil.rmtree(user_db_path)
 
-    # Step 2: Load and process the new .docx documents
-    if status_callback: status_callback("Loading new documents...")
-    all_new_docs = []
-    for doc_path in list_of_doc_paths:
+    all_docs = []
+
+    # 2. Load the foundational knowledge from the base PDFs
+    if status_callback: status_callback("Loading foundational knowledge...")
+    for filename in BASE_PDF_FILES:
+        path = os.path.join(BASE_DOCS_DIR, filename)
+        if os.path.exists(path):
+            try:
+                loader = PyPDFLoader(path)
+                all_docs.extend(loader.load())
+            except Exception as e:
+                if status_callback: status_callback(f"Error loading base file {filename}: {e}")
+        else:
+            if status_callback: status_callback(f"Warning: Base document not found: {filename}")
+    
+    # 3. Load the user's newly uploaded documents
+    if status_callback: status_callback("Loading new user documents...")
+    for file_obj in uploaded_docx_files:
         try:
-            loader = Docx2txtLoader(doc_path)
-            all_new_docs.extend(loader.load())
+            # Create a temporary path to load the document
+            temp_dir = os.path.join(BASE_DIR, "temp_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_path = os.path.join(temp_dir, file_obj.name)
+            with open(temp_path, "wb") as f:
+                f.write(file_obj.getvalue())
+            
+            loader = Docx2txtLoader(temp_path)
+            all_docs.extend(loader.load())
+            
+            # Clean up the temporary file
+            os.remove(temp_path)
+
         except Exception as e:
-            if status_callback: status_callback(f"Error loading {os.path.basename(doc_path)}: {e}")
+            if status_callback: status_callback(f"Error loading uploaded file {file_obj.name}: {e}")
             continue
 
-    if not all_new_docs:
-        if status_callback: status_callback("No new documents to add.")
+    if not all_docs:
+        if status_callback: status_callback("No documents found to process.")
         return
 
+    # 4. Split all documents together
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(all_new_docs)
-    if status_callback: status_callback(f"Split new documents into {len(chunks)} chunks.")
+    chunks = text_splitter.split_documents(all_docs)
+    if status_callback: status_callback(f"Split all documents into {len(chunks)} chunks.")
 
-    # Step 3: Add new chunks using the native ChromaDB client to avoid file locks
+    # 5. Create the new database in a single, robust operation
     if chunks:
-        try:
-            if status_callback: status_callback("Connecting to user database...")
-            
-            # Initialize the native ChromaDB client
-            client = chromadb.PersistentClient(path=user_db_path)
-            
-            # Get the OpenAI API key for the embedding function
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not openai_api_key:
-                raise ValueError("OPENAI_API_KEY not found in environment variables.")
-            
-            # Create a ChromaDB-compatible embedding function
-            chroma_ef = chroma_embedding_functions.OpenAIEmbeddingFunction(
-                api_key=openai_api_key,
-                model_name="text-embedding-ada-002"
-            )
+        if status_callback: status_callback("Embedding documents... This may take several minutes.")
+        embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002", max_retries=6, chunk_size=500)
+        
+        Chroma.from_documents(
+            documents=chunks,
+            embedding=embedding_function,
+            persist_directory=user_db_path,
+            collection_name=COLLECTION_NAME
+        )
+        
+        if status_callback: status_callback("✅ Training complete! New knowledge base is ready.")
+    else:
+        if status_callback: status_callback("No content found in documents to train on.")
 
-            # --- CORRECTED: Use get_or_create_collection to prevent errors for new users ---
-            collection = client.get_or_create_collection(
-                name=COLLECTION_NAME, # This should be the user collection name
-                embedding_function=chroma_ef
-            )
-            
-            if status_callback: status_callback("Adding new knowledge to the database...")
-            
-            # Prepare data for the native client, ensuring unique IDs
-            existing_ids_count = collection.count()
-            ids = [f"user_chunk_{existing_ids_count + i}" for i in range(len(chunks))]
-            documents_content = [chunk.page_content for chunk in chunks]
-            metadatas = [chunk.metadata for chunk in chunks]
-
-            # Add the new documents to the collection
-            collection.add(
-                documents=documents_content,
-                metadatas=metadatas,
-                ids=ids
-            )
-            
-            if status_callback: status_callback("✅ Knowledge base successfully updated!")
-
-        except Exception as e:
-            if status_callback: status_callback(f"An error occurred during database update: {e}")
-            raise e
-
-# This part of the script is for manual command-line testing and is not used by the UI.
+# This part is for manual command-line testing
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Add documents to a user's knowledge base.")
-    parser.add_argument("--user_id", type=str, required=True, help="The unique identifier for the user.")
-    parser.add_argument("files", nargs='+', help="The path(s) to the .docx file(s) to add.")
-    args = parser.parse_args()
-    
-    add_documents_to_user_db(args.user_id, args.files, status_callback=print)
+    parser = argparse.ArgumentParser(description="Build a user-specific knowledge base.")
+    # Note: Command-line execution for this script is now for testing/debug purposes only.
+    # The primary use is via the UI.
+    print("This script is primarily intended to be called from the UI.")
