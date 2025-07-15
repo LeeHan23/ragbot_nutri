@@ -8,8 +8,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db") 
 # Path to the directory for the foundational PDF knowledge base
 BASE_DB_PATH = os.path.join(BASE_DIR, "vectorstore_base")
-COLLECTION_NAME = "user_knowledge" # Use a consistent collection name for user DBs
-BASE_COLLECTION_NAME = "base_knowledge" # Collection name for the base DB
+# The collection name is now consistent because we copy the base DB
+COLLECTION_NAME = "base_knowledge" 
 
 # --- Embedding Function ---
 try:
@@ -30,15 +30,13 @@ def get_retriever(user_id: str):
     
     user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
     
-    # Determine which database path and collection name to use
+    # Determine which database path to use
     if os.path.exists(user_specific_db_path):
         print(f"Loading custom knowledge base for user '{user_id}'.")
         persistent_directory = user_specific_db_path
-        collection_name = COLLECTION_NAME
     else:
         print(f"No custom knowledge for user '{user_id}'. Falling back to foundational knowledge base.")
         persistent_directory = BASE_DB_PATH
-        collection_name = BASE_COLLECTION_NAME
 
     if not os.path.exists(persistent_directory):
         raise FileNotFoundError(
@@ -49,8 +47,8 @@ def get_retriever(user_id: str):
     vector_store = Chroma(
         persist_directory=persistent_directory,
         embedding_function=embedding_function,
-        collection_name=collection_name
+        collection_name=COLLECTION_NAME # Use the consistent collection name
     )
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    print(f"Retriever initialized using collection: '{collection_name}'.")
+    print(f"Retriever initialized using collection: '{COLLECTION_NAME}'.")
     return retriever
