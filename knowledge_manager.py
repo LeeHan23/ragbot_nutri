@@ -28,7 +28,7 @@ BASE_PDF_FILES = [
 def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
     Builds a complete, user-specific knowledge base by combining foundational
-    PDFs with newly uploaded user documents. This replaces any existing DB for the user.
+    PDFs with newly uploaded user documents in a single, robust operation.
     
     Args:
         user_id (str): The unique identifier for the user.
@@ -79,6 +79,9 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
             
             # Clean up the temporary file
             os.remove(temp_path)
+            # Clean up temp directory if empty
+            if not os.listdir(temp_dir):
+                os.rmdir(temp_dir)
 
         except Exception as e:
             if status_callback: status_callback(f"Error loading uploaded file {file_obj.name}: {e}")
@@ -112,6 +115,4 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
 # This part is for manual command-line testing
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build a user-specific knowledge base.")
-    # Note: Command-line execution for this script is now for testing/debug purposes only.
-    # The primary use is via the UI.
     print("This script is primarily intended to be called from the UI.")
