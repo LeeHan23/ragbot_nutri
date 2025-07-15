@@ -1,4 +1,10 @@
 import os
+from dotenv import load_dotenv
+
+# --- Load environment variables from .env file FIRST ---
+# This must be done before importing other modules that need the variables.
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -26,7 +32,8 @@ async def startup_event():
     data_paths = {
         "knowledge": os.path.join(base_dir, "data/knowledge"),
         "promos": os.path.join(base_dir, "data/promos"),
-        "instructions": os.path.join(base_dir, "data/instructions")
+        "instructions": os.path.join(base_dir, "data/instructions"),
+        "sessions": os.path.join(base_dir, "data/sessions") # For persistent user sessions
     }
     for name, path in data_paths.items():
         if not os.path.exists(path):

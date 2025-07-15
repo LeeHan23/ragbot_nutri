@@ -16,16 +16,15 @@ def get_llm():
     Initializes and returns the ChatOpenAI model instance.
 
     This function configures the language model to be used for generating responses.
-    We use gpt-4-turbo for its strong reasoning and instruction-following capabilities,
-    which is ideal for conversational context.
+    We use gpt-3.5-turbo as it is widely available and effective for this task.
     
     Returns:
         An instance of ChatOpenAI.
     """
     try:
-        # For conversational memory, a more capable model is recommended.
+        # Using gpt-3.5-turbo is more compatible with free-tier and new API keys.
         llm = ChatOpenAI(
-            model_name="gpt-4-turbo",
+            model_name="gpt-3.5-turbo",
             temperature=0.7,
             max_tokens=500,
             openai_api_key=OPENAI_API_KEY

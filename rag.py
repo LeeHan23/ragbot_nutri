@@ -1,10 +1,15 @@
 import os
+from dotenv import load_dotenv
+
+# --- Load environment variables from .env file FIRST ---
+load_dotenv()
+
 from typing import List, Tuple, Dict, Any
-from langchain.chains import ConversationalRetrievalChain
-from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # Import functions from other modules
 from vector_store import get_retriever
@@ -14,44 +19,6 @@ from llm import get_llm
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
 INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
-
-# --- Define the desired output structure ---
-class BotResponse(BaseModel):
-    answer: str = Field(description="The full, multi-line response to send to the user, with newlines separating each message bubble.")
-    new_summary: str = Field(description="An updated, concise summary of the user's intents based on the current conversation.")
-
-# --- Prompt Templates ---
-SYSTEM_PROMPT_TEMPLATE = """
-You are "Eva," an expert wellness assistant. Your goal is to have a personalized, stateful conversation.
-
-**USER METADATA (Your long-term memory of the user):**
-- Visit Count: {visit_count}
-- Summary of Past Interests: {intent_summary}
-
-**PERSONA AND BEHAVIOR INSTRUCTIONS:**
-Use the User Metadata to personalize the conversation. For example, greet returning users differently.
-{behavior_instructions}
-
-**ACTIVE PROMOTIONS/DISCOUNTS:**
-{promo_text}
-
-**CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
-{context}
-
-**CURRENT CONVERSATION (Your short-term memory):**
-{chat_history}
-
-**USER'S LATEST MESSAGE:**
-{question}
-
-Based on ALL of the above, generate your response and an updated summary of the user's intents.
-Your final output must be a JSON object matching the required format.
-"""
-
-# The condense question prompt remains the same
-CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(
-    "Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question, in its original language.\n\nChat History:\n{chat_history}\nFollow Up Input: {question}\nStandalone question:"
-)
 
 # --- Helper Function (Unchanged) ---
 def _load_latest_text_file(directory: str, default_text: str = "Not available.") -> str:
@@ -69,76 +36,81 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
         return default_text
 
 # --- Main RAG Pipeline ---
-def get_rag_conversation_chain():
-    """Initializes the ConversationalRetrievalChain."""
-    llm = get_llm()
-    retriever = get_retriever()
-    
-    # The memory object that the chain will use to store the conversation.
-    # The output_key='answer' is important for the chain's internal logic.
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key='answer')
-
-    conversation_chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=retriever,
-        memory=memory,
-        condense_question_prompt=CONDENSE_QUESTION_PROMPT,
-        # The final prompt is now set dynamically per request, so we don't set it here.
-        return_source_documents=False,
-        return_generated_question=False,
-    )
-    print("ConversationalRetrievalChain initialized.")
-    return conversation_chain
-
-# Create a single, reusable chain instance to avoid re-initializing on every message.
-rag_chain = get_rag_conversation_chain()
-
-async def get_contextual_response(user_message: str, user_data: Dict[str, Any]) -> Dict[str, str]:
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> str:
     """
-    Gets an intent-aware response using the user's entire session data.
+    Gets a contextual response using a chain that is dynamically configured for a specific user.
     """
     try:
-        print("--- Invoking Intent-Aware Conversational Chain ---")
+        print(f"--- Invoking LCEL Chain for user: {user_id} ---")
         
-        # Load dynamic content for each call to ensure it's always fresh
+        llm = get_llm()
+        # Get the specific retriever for the current user
+        retriever = get_retriever(user_id) 
+
+        # 1. Prompt to rephrase a follow-up question
+        contextualize_q_system_prompt = """Given a chat history and the latest user question \
+        which might reference context in the chat history, formulate a standalone question \
+        which can be understood without the chat history. Do NOT answer the question, \
+        just reformulate it if needed and otherwise return it as is."""
+        
+        contextualize_q_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", contextualize_q_system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+        history_aware_retriever = create_history_aware_retriever(
+            llm, retriever, contextualize_q_prompt
+        )
+
+        # 2. Main prompt to answer the question
         behavior_instructions = _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly.")
         promo_text = _load_latest_text_file(PROMOS_PATH, "No active promotions.")
 
-        # Set up the JSON parser
-        parser = JsonOutputParser(pydantic_object=BotResponse)
+        system_prompt = f"""
+        You are "Eva," an expert wellness assistant. Your goal is to have a personalized, stateful conversation.
+        Your personality and response style are strictly defined by the detailed instructions below.
+        You MUST have a natural, back-and-forth conversation, breaking your response into short, individual messages using newlines (\\n).
+        Use the chat history to understand the context of the conversation and the user metadata to personalize your greeting and responses.
 
-        # Create the full, dynamic prompt template for the final combination step
-        final_prompt = PromptTemplate(
-            template=SYSTEM_PROMPT_TEMPLATE,
-            input_variables=["chat_history", "question", "context"],
-            partial_variables={
-                "visit_count": user_data.get("visit_count", 1),
-                "intent_summary": user_data.get("intent_summary", "No interactions yet."),
-                "behavior_instructions": behavior_instructions,
-                "promo_text": promo_text,
-            }
-        )
+        **USER METADATA (Your long-term memory of the user):**
+        - Visit Count: {user_data.get("visit_count", 1)}
+        - Summary of Past Interests: {user_data.get("intent_summary", "No interactions yet.")}
+
+        **PERSONA AND BEHAVIOR INSTRUCTIONS:**
+        {behavior_instructions}
+
+        **ACTIVE PROMOTIONS/DISCOUNTS:**
+        {promo_text}
+
+        **CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
+        {{context}}
+
+        Based on ALL of the above, provide a comprehensive, natural, and helpful response.
+        """
         
-        # Temporarily override the chain's prompt for this specific call.
-        # This ensures every user gets the most up-to-date persona and their own metadata.
-        rag_chain.combine_docs_chain.llm_chain.prompt = final_prompt
+        qa_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
 
-        # Invoke the chain with the user's question and their specific chat history
+        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        
+        # Invoke the chain
         result = await rag_chain.ainvoke({
-            "question": user_message,
-            "chat_history": user_data.get("chat_history", [])
+            "input": user_message,
+            "chat_history": user_data.get("chat_history", []),
         })
+        
+        return result.get("answer", "I'm not sure how to respond to that.")
 
-        # The raw output from the LLM is a JSON string inside the 'answer' key.
-        # We need to parse this string to get our structured BotResponse object.
-        parsed_result = parser.parse(result["answer"])
-
-        return parsed_result
-
+    except FileNotFoundError:
+        return "It looks like I don't have a knowledge base for you yet. Please run 'python create_database.py --user_id YOUR_USER_ID' to build it first!"
     except Exception as e:
         print(f"Error invoking conversational chain: {e}")
-        # Provide a safe fallback response in case of parsing or other errors
-        return {
-            "answer": "I'm sorry, I encountered an issue. Could you please rephrase that?",
-            "new_summary": user_data.get("intent_summary", "Error in conversation.")
-        }
+        return "I'm sorry, I encountered an issue. Could you please rephrase?"

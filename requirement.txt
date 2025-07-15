@@ -4,6 +4,10 @@ uvicorn[standard]
 gunicorn
 python-dotenv
 python-multipart
+argparse
+
+# --- Web UI ---
+streamlit
 
 # --- WhatsApp Integration ---
 twilio
@@ -18,4 +22,6 @@ chromadb
 
 # --- Document Processing ---
 python-docx
+pypdf
+docx2txt 
 aiofiles
