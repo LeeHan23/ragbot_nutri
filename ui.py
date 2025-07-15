@@ -9,8 +9,8 @@ load_dotenv()
 
 from rag import get_contextual_response
 from langchain_core.messages import HumanMessage, AIMessage
-# Import the function from our refactored script
-from create_database import build_user_database
+# --- CORRECTED: Import from the renamed 'knowledge_manager.py' file ---
+from knowledge_manager import build_user_database
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
