@@ -6,7 +6,6 @@ load_dotenv()
 
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -35,9 +34,12 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
         return default_text
 
 # --- Main RAG Pipeline ---
-async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> str:
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Gets a contextual response using a chain that is dynamically configured for a specific user.
+    Gets a contextual response and the source documents used to generate it.
+    
+    Returns:
+        A dictionary containing the 'answer' and the 'context' (sources).
     """
     try:
         print(f"--- Invoking LCEL Chain for user: {user_id} ---")
@@ -95,14 +97,8 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        # --- CORRECTED: Use RunnablePassthrough to correctly inject all variables ---
-        rag_chain = (
-            RunnablePassthrough.assign(
-                context=history_aware_retriever,
-            )
-            | qa_prompt
-            | llm
-        )
+        # --- CORRECTED: Use create_retrieval_chain to ensure the final output is a dictionary ---
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
         
         # Invoke the chain with all necessary inputs
         result = await rag_chain.ainvoke({
@@ -114,10 +110,20 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        return result.content
+        # The result is now a dictionary containing 'answer' and 'context'
+        return {
+            "answer": result.get("answer", "I'm not sure how to respond to that."),
+            "sources": result.get("context", [])
+        }
 
     except FileNotFoundError:
-        return "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!"
+        return {
+            "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
+            "sources": []
+        }
     except Exception as e:
         print(f"Error invoking conversational chain: {e}")
-        return "I'm sorry, I encountered an issue. Could you please rephrase?"
+        return {
+            "answer": "I'm sorry, I encountered an issue. Could you please rephrase?",
+            "sources": []
+        }
