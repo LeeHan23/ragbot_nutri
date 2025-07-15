@@ -23,5 +23,6 @@ chromadb
 # --- Document Processing ---
 python-docx
 pypdf
-docx2txt 
+docx2txt
+pymupdf # <-- ADD THIS LINE
 aiofiles

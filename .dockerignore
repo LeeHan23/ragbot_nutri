@@ -19,7 +19,8 @@ __pycache__/
 # Environment variables file (IMPORTANT for security)
 .env
 
-# User-specific data and databases
-# These should be mounted as volumes, not included in the image
+# User and database directories
+# These are handled by volumes to persist data outside the container
 data/users/
 chroma_db/
+vectorstore_base/

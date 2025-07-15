@@ -4,8 +4,12 @@ from langchain_openai import OpenAIEmbeddings
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHROMA_BASE_PATH = os.path.join(BASE_DIR, "chroma_db")
-COLLECTION_NAME = "user_knowledge"
+# Path to the directory for user-specific, augmented knowledge bases
+USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db") 
+# Path to the directory for the foundational PDF knowledge base
+BASE_DB_PATH = os.path.join(BASE_DIR, "vectorstore_base")
+COLLECTION_NAME = "user_knowledge" # Use a consistent collection name for user DBs
+BASE_COLLECTION_NAME = "base_knowledge" # Collection name for the base DB
 
 # --- Embedding Function ---
 try:
@@ -17,25 +21,36 @@ except Exception as e:
 # --- Retriever Function ---
 def get_retriever(user_id: str):
     """
-    Initializes and returns a Chroma vector store retriever for a specific user.
+    Initializes and returns a Chroma vector store retriever.
+    It prioritizes the user-specific database if it exists, otherwise
+    it falls back to the foundational base database.
     """
     if not embedding_function:
         raise ValueError("Embedding function is not initialized. Cannot create retriever.")
     
-    # Define the path to the specific user's database
-    persistent_directory = os.path.join(CHROMA_BASE_PATH, user_id)
+    user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
+    
+    # Determine which database path and collection name to use
+    if os.path.exists(user_specific_db_path):
+        print(f"Loading custom knowledge base for user '{user_id}'.")
+        persistent_directory = user_specific_db_path
+        collection_name = COLLECTION_NAME
+    else:
+        print(f"No custom knowledge for user '{user_id}'. Falling back to foundational knowledge base.")
+        persistent_directory = BASE_DB_PATH
+        collection_name = BASE_COLLECTION_NAME
 
     if not os.path.exists(persistent_directory):
-        # Return a dummy retriever or handle this case gracefully if no DB exists
-        print(f"Warning: No database found for user '{user_id}'. The bot will have no specific knowledge.")
-        # You could create an empty retriever here if needed, but for now we'll raise an error.
-        raise FileNotFoundError(f"Database for user '{user_id}' not found.")
+        raise FileNotFoundError(
+            f"Required database not found at {persistent_directory}. "
+            "Please ensure the base database is built by running 'build_base_db.py'."
+        )
 
     vector_store = Chroma(
         persist_directory=persistent_directory,
         embedding_function=embedding_function,
-        collection_name=COLLECTION_NAME
+        collection_name=collection_name
     )
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    print(f"Retriever initialized for user '{user_id}'.")
+    print(f"Retriever initialized using collection: '{collection_name}'.")
     return retriever
