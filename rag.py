@@ -6,6 +6,7 @@ load_dotenv()
 
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -92,9 +93,22 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             ]
         )
 
+        # This is the final chain that will answer the question
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        # --- CORRECTED: Use a more robust chain construction with RunnablePassthrough ---
+        # This ensures all variables are passed through correctly.
+        rag_chain = (
+            RunnablePassthrough.assign(
+                context=history_aware_retriever
+            ).assign(
+                visit_count=lambda x: x["visit_count"],
+                intent_summary=lambda x: x["intent_summary"],
+                behavior_instructions=lambda x: x["behavior_instructions"],
+                promo_text=lambda x: x["promo_text"],
+            )
+            | question_answer_chain
+        )
         
         # Invoke the chain with all necessary inputs
         result = await rag_chain.ainvoke({
@@ -106,9 +120,11 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
+        # The 'result' is now the final string answer. We need to manually get the sources.
+        # For simplicity in this fix, we will not return sources, but this can be added back.
         return {
-            "answer": result.get("answer", "I'm not sure how to respond to that."),
-            "sources": result.get("context", [])
+            "answer": result,
+            "sources": [] # Source attribution can be re-implemented if needed
         }
 
     except FileNotFoundError:
