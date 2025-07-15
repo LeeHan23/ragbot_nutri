@@ -37,9 +37,6 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
 async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
     Gets a contextual response and the source documents used to generate it.
-    
-    Returns:
-        A dictionary containing the 'answer' and the 'context' (sources).
     """
     try:
         print(f"--- Invoking LCEL Chain for user: {user_id} ---")
@@ -97,7 +94,6 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        # --- CORRECTED: Use create_retrieval_chain to ensure the final output is a dictionary ---
         rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
         
         # Invoke the chain with all necessary inputs
@@ -110,7 +106,6 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        # The result is now a dictionary containing 'answer' and 'context'
         return {
             "answer": result.get("answer", "I'm not sure how to respond to that."),
             "sources": result.get("context", [])
