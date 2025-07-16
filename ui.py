@@ -9,7 +9,7 @@ load_dotenv()
 
 from rag import get_contextual_response
 from langchain_core.messages import HumanMessage, AIMessage
-# --- CORRECTED: Import from the renamed 'knowledge_manager.py' file ---
+# --- Import from the renamed 'knowledge_manager.py' file ---
 from knowledge_manager import build_user_database
 
 # --- Constants ---
@@ -48,21 +48,23 @@ with st.sidebar:
 
     st.header("Train Your Bot")
     uploaded_files = st.file_uploader(
-        "Upload your .docx files to create a new knowledge base",
+        "Upload your .docx files to add to the bot's knowledge",
         accept_multiple_files=True,
         type=['docx']
     )
 
-    if st.button("Build New Knowledge Base"):
+    if st.button("Add Documents to Knowledge Base"):
         user_id = st.session_state.current_user_id
         if not user_id:
             st.error("Please start a user session first.")
         elif not uploaded_files:
             st.warning("Please upload at least one .docx document.")
         else:
-            with st.spinner("Building new knowledge base... This will replace any existing custom knowledge and may take several minutes."):
+            with st.spinner("Processing and adding new knowledge... This will be quick!"):
+                # Call the updated function to augment the user's DB
                 build_user_database(user_id, uploaded_files, status_callback=st.write)
-            st.success("Training complete! Your bot is ready with the new knowledge.")
+                
+            st.success("Training complete! Your bot has learned from the new documents.")
     
     if st.button("Reset to Foundational Knowledge"):
         user_id = st.session_state.current_user_id
@@ -73,18 +75,18 @@ with st.sidebar:
                 user_db_path = os.path.join(USER_DB_PATH, user_id)
                 if os.path.exists(user_db_path):
                     shutil.rmtree(user_db_path)
+                
                 st.session_state.messages[user_id] = []
                 st.session_state.user_data[user_id]["chat_history"] = []
+
             st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
 
 # --- Main Chat Interface ---
 st.title("🤖 Personalized AI Chatbot")
-st.caption("Your personal AI assistant. Upload documents in the sidebar to train it.")
+st.caption("Your personal AI assistant. Add your own documents in the sidebar to customize its knowledge.")
 
 if st.session_state.current_user_id:
     user_id = st.session_state.current_user_id
-    
-    user_db_path = os.path.join(USER_DB_PATH, user_id)
     
     for message in st.session_state.messages.get(user_id, []):
         with st.chat_message(message["role"]):
