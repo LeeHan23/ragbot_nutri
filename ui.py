@@ -9,7 +9,7 @@ load_dotenv()
 
 from rag import get_contextual_response
 from langchain_core.messages import HumanMessage, AIMessage
-# Import the function from our refactored script
+# --- CORRECTED: Import from the renamed 'knowledge_manager.py' file ---
 from knowledge_manager import build_user_database
 
 # --- Constants ---
@@ -85,16 +85,15 @@ if st.session_state.current_user_id:
     user_id = st.session_state.current_user_id
     
     user_db_path = os.path.join(USER_DB_PATH, user_id)
-    # The check for the base DB is now handled inside vector_store.py
     
     for message in st.session_state.messages.get(user_id, []):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            # --- NEW: Display sources if they exist for an assistant message ---
-            if message["role"] == "assistant" and "sources" in message:
+            if message["role"] == "assistant" and "sources" in message and message["sources"]:
                 with st.expander("View Sources"):
                     for source in message["sources"]:
-                        st.info(f"Source: {source.metadata.get('source', 'N/A')}")
+                        source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                        st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
                         st.text(source.page_content)
 
     if prompt := st.chat_input("Ask me anything..."):
@@ -112,16 +111,13 @@ if st.session_state.current_user_id:
                 
                 st.write(response_text)
 
-                # --- NEW: Display sources for the latest response ---
                 if sources:
                     with st.expander("View Sources"):
                         for source in sources:
-                            # Try to get a clean source name from metadata
                             source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
                             st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
                             st.text(source.page_content)
 
-        # --- MODIFIED: Add the response and sources to the session state ---
         st.session_state.messages[user_id].append({
             "role": "assistant", 
             "content": response_text,

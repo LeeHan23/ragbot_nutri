@@ -6,7 +6,6 @@ load_dotenv()
 
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -95,7 +94,7 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
-        # --- CORRECTED: Use create_retrieval_chain to correctly pipe the components ---
+        # This is the final chain that ties everything together.
         rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
         
         # Invoke the chain with all necessary inputs
@@ -108,7 +107,6 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        # The result is now a dictionary containing 'answer' and 'context'
         return {
             "answer": result.get("answer", "I'm not sure how to respond to that."),
             "sources": result.get("context", [])
