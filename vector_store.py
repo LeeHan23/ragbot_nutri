@@ -1,15 +1,12 @@
 import os
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
-from langchain.retrievers.self_query.base import SelfQueryRetriever
-from langchain.chains.query_constructor.base import AttributeInfo
-
-# Import the LLM for the self-query retriever
-from llm import get_llm
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Path to the directory for user-specific, augmented knowledge bases
 USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db") 
+# Path to the directory for the foundational PDF knowledge base
 BASE_DB_PATH = os.path.join(BASE_DIR, "vectorstore_base")
 # The collection name is now consistent because we copy the base DB
 COLLECTION_NAME = "base_knowledge" 
@@ -21,25 +18,10 @@ except Exception as e:
     print(f"Error initializing LangChain OpenAI Embeddings: {e}")
     embedding_function = None
 
-# --- Metadata Field Information ---
-metadata_field_info = [
-    AttributeInfo(
-        name="source",
-        description="The source document the chunk of text came from. Can be one of 'RNI2017', 'MDG2020', 'Internal_Knowledge', or 'Behavior_Instructions'.",
-        type="string",
-    ),
-    AttributeInfo(
-        name="page",
-        description="The page number of the original document.",
-        type="integer"
-    ),
-]
-document_content_description = "Information about nutrition, dietary guidelines, and nutrient recommendations."
-
 # --- Retriever Function ---
 def get_retriever(user_id: str):
     """
-    Initializes and returns a Self-Querying Retriever.
+    Initializes and returns a standard vector store retriever.
     It prioritizes the user-specific database if it exists, otherwise
     it falls back to the foundational base database.
     """
@@ -68,16 +50,8 @@ def get_retriever(user_id: str):
         collection_name=COLLECTION_NAME # Use the consistent collection name
     )
     
-    llm = get_llm()
-
-    # Create the Self-Querying Retriever
-    retriever = SelfQueryRetriever.from_llm(
-        llm,
-        vector_store,
-        document_content_description,
-        metadata_field_info,
-        verbose=True
-    )
+    # Use a standard, more reliable retriever
+    retriever = vector_store.as_retriever(search_kwargs={"k": 5}) # Increased k to retrieve more context
     
-    print(f"Self-Querying Retriever initialized for user '{user_id}'.")
+    print(f"Standard retriever initialized for user '{user_id}'.")
     return retriever
