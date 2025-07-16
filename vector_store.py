@@ -57,12 +57,15 @@ def get_retriever(user_id: str):
         persistent_directory = BASE_DB_PATH
 
     if not os.path.exists(persistent_directory):
-        raise FileNotFoundError(f"Required database not found at {persistent_directory}.")
+        raise FileNotFoundError(
+            f"Required database not found at {persistent_directory}. "
+            "Please ensure the base database is built by running 'build_base_db.py'."
+        )
 
     vector_store = Chroma(
         persist_directory=persistent_directory,
         embedding_function=embedding_function,
-        collection_name=COLLECTION_NAME
+        collection_name=COLLECTION_NAME # Use the consistent collection name
     )
     
     llm = get_llm()
