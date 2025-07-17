@@ -34,9 +34,9 @@ def _load_latest_text_file(directory: str, default_text: str = "Not available.")
         return default_text
 
 # --- Main RAG Pipeline ---
-async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> str:
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Gets a contextual response from the RAG chain. This version returns a simple string.
+    Gets a contextual response and the source documents used to generate it.
     """
     try:
         print(f"--- Invoking LCEL Chain for user: {user_id} ---")
@@ -94,6 +94,7 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
 
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         
+        # This is the final chain that ties everything together.
         rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
         
         # Invoke the chain with all necessary inputs
@@ -106,10 +107,19 @@ async def get_contextual_response(user_message: str, user_data: Dict[str, Any], 
             "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        return result.get("answer", "I'm not sure how to respond to that.")
+        return {
+            "answer": result.get("answer", "I'm not sure how to respond to that."),
+            "sources": result.get("context", [])
+        }
 
     except FileNotFoundError:
-        return "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!"
+        return {
+            "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
+            "sources": []
+        }
     except Exception as e:
         print(f"Error invoking conversational chain: {e}")
-        return "I'm sorry, I encountered an issue. Could you please rephrase?"
+        return {
+            "answer": "I'm sorry, I encountered an issue. Could you please rephrase?",
+            "sources": []
+        }
