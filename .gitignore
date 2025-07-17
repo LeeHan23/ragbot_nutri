@@ -36,12 +36,13 @@ venv.bak/
 # Vector Store Databases
 # These are generated at runtime and should not be in the repository
 chroma_db/
-vectorstore_base/
+vectorstore_base/  # <-- ADD THIS LINE
 
 # Runtime Data
 # Ignore the specific folders for user-uploaded content and sessions
 data/users/
 data/sessions/
+temp_uploads/
 
 # Secrets - VERY IMPORTANT
 # This file contains your API keys and should never be committed.
