@@ -1,7 +1,6 @@
 import os
 import shutil
 import argparse
-import time # <-- IMPORT THE TIME MODULE
 from dotenv import load_dotenv
 
 # --- Load environment variables from .env file FIRST ---
@@ -16,8 +15,8 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Directory where the foundational PDFs are stored
 BASE_DOCS_DIR = os.path.join(BASE_DIR, "data", "base_documents")
-# Directory where the final user-specific databases are saved
-USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
+# Directory where the final user-specific databases are saved on the persistent disk
+USER_DB_PATH = os.path.join(os.environ.get("PERSISTENT_DISK_PATH", "/data"), "chroma_db")
 COLLECTION_NAME = "user_knowledge"
 
 # --- List of foundational PDF documents ---
@@ -30,6 +29,7 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     """
     Builds a complete, user-specific knowledge base by combining foundational
     PDFs with newly uploaded user documents in a single, robust operation.
+    This is the most reliable method to prevent file-locking errors.
     
     Args:
         user_id (str): The unique identifier for the user.
@@ -48,9 +48,6 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     if os.path.exists(user_db_path):
         if status_callback: status_callback("Clearing old custom knowledge base...")
         shutil.rmtree(user_db_path)
-        # --- ADDED: A short delay to allow the file system to process the deletion ---
-        time.sleep(1) 
-        if status_callback: status_callback("Old knowledge base cleared.")
 
     all_docs = []
 
