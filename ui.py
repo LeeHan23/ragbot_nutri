@@ -3,6 +3,7 @@ import asyncio
 import os
 import shutil
 from dotenv import load_dotenv
+import streamlit.components.v1 as components # <-- IMPORT STREAMLIT COMPONENTS
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
@@ -18,13 +19,23 @@ USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
+# --- GoatCounter Analytics Tracking ---
+# This will embed your tracking script into the app's HTML
+# It's placed at the top to ensure it loads on every page view.
+goatcounter_script = """
+    <script data-goatcounter="https://han233.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+"""
+components.html(goatcounter_script, height=0)
+
+
 # --- Password Protection ---
 def check_password():
     """Returns `True` if the user had the correct password."""
     if "password_correct" not in st.session_state:
         # First run, show inputs for password.
         st.header("Enter Password to Access")
-        password = st.text_input("Password", type="password")
+        password = st.text_input("Password", type="password", key="password_input")
         if st.button("Enter"):
             # The password should be set as a secret in your hosting environment (e.g., Render)
             correct_password = os.environ.get("APP_PASSWORD")
@@ -37,7 +48,7 @@ def check_password():
     elif not st.session_state["password_correct"]:
         # Password not correct, show input + error.
         st.header("Enter Password to Access")
-        password = st.text_input("Password", type="password")
+        password = st.text_input("Password", type="password", key="password_input_retry")
         if st.button("Enter"):
             correct_password = os.environ.get("APP_PASSWORD")
             if password == correct_password:
@@ -51,6 +62,7 @@ def check_password():
         return True
 
 # --- Main App Logic ---
+# The entire app is now wrapped in the password check
 if check_password():
     # --- Session State Management ---
     if "messages" not in st.session_state:
