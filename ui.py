@@ -3,7 +3,6 @@ import asyncio
 import os
 import shutil
 from dotenv import load_dotenv
-import streamlit.components.v1 as components # <-- IMPORT STREAMLIT COMPONENTS
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
@@ -19,132 +18,113 @@ USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
-# --- GoatCounter Analytics Tracking ---
-# This will embed your tracking script into the app's HTML
-# It's placed at the top to ensure it loads on every page view.
-goatcounter_script = """
-    <script data-goatcounter="https://han233.goatcounter.com/count"
-        async src="//gc.zgo.at/count.js"></script>
-"""
-components.html(goatcounter_script, height=0)
+# --- Session State Management ---
+if "messages" not in st.session_state:
+    st.session_state.messages = {}
+if "user_data" not in st.session_state:
+    st.session_state.user_data = {}
+if "current_user_id" not in st.session_state:
+    st.session_state.current_user_id = None
 
+# --- Sidebar for User Management and Training ---
+with st.sidebar:
+    st.header("User & Knowledge Management")
+    
+    user_id_input = st.text_input("Enter your User ID to start chatting:", key="user_id_input")
+    if st.button("Start/Switch User Session"):
+        if user_id_input:
+            st.session_state.current_user_id = user_id_input
+            if user_id_input not in st.session_state.messages:
+                st.session_state.messages[user_id_input] = []
+                st.session_state.user_data[user_id_input] = {
+                    "chat_history": [], "visit_count": 1, "intent_summary": "User is starting a new conversation."
+                }
+            st.success(f"Session started for user: {user_id_input}")
+        else:
+            st.warning("Please enter a User ID.")
 
-# --- Password Protection ---
-def check_password():
-    """Returns `True` if the user had the correct password."""
-    if "password_correct" not in st.session_state:
-        # First run, show inputs for password.
-        st.header("Enter Password to Access")
-        password = st.text_input("Password", type="password", key="password_input")
-        if st.button("Enter"):
-            # The password should be set as a secret in your hosting environment (e.g., Render)
-            correct_password = os.environ.get("APP_PASSWORD")
-            if password == correct_password:
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("The password you entered is incorrect.")
-        return False
-    elif not st.session_state["password_correct"]:
-        # Password not correct, show input + error.
-        st.header("Enter Password to Access")
-        password = st.text_input("Password", type="password", key="password_input_retry")
-        if st.button("Enter"):
-            correct_password = os.environ.get("APP_PASSWORD")
-            if password == correct_password:
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("The password you entered is incorrect.")
-        return False
-    else:
-        # Password correct.
-        return True
+    st.divider()
 
-# --- Main App Logic ---
-# The entire app is now wrapped in the password check
-if check_password():
-    # --- Session State Management ---
-    if "messages" not in st.session_state:
-        st.session_state.messages = {}
-    if "user_data" not in st.session_state:
-        st.session_state.user_data = {}
-    if "current_user_id" not in st.session_state:
-        st.session_state.current_user_id = None
+    st.header("Train Your Bot")
+    uploaded_files = st.file_uploader(
+        "Upload your .docx files to create a new knowledge base",
+        accept_multiple_files=True,
+        type=['docx']
+    )
 
-    # --- Sidebar for User Management and Training ---
-    with st.sidebar:
-        st.header("User & Knowledge Management")
-        
-        user_id_input = st.text_input("Enter your User ID to start chatting:", key="user_id_input")
-        if st.button("Start/Switch User Session"):
-            if user_id_input:
-                st.session_state.current_user_id = user_id_input
-                if user_id_input not in st.session_state.messages:
-                    st.session_state.messages[user_id_input] = []
-                    st.session_state.user_data[user_id_input] = {
-                        "chat_history": [], "visit_count": 1, "intent_summary": "User is starting a new conversation."
-                    }
-                st.success(f"Session started for user: {user_id_input}")
-            else:
-                st.warning("Please enter a User ID.")
-
-        st.divider()
-
-        st.header("Train Your Bot")
-        uploaded_files = st.file_uploader(
-            "Upload your .docx files to create a new knowledge base",
-            accept_multiple_files=True,
-            type=['docx']
-        )
-
-        if st.button("Build New Knowledge Base"):
-            user_id = st.session_state.current_user_id
-            if not user_id:
-                st.error("Please start a user session first.")
-            elif not uploaded_files:
-                st.warning("Please upload at least one .docx document.")
-            else:
-                with st.spinner("Building new knowledge base... This may take several minutes."):
-                    build_user_database(user_id, uploaded_files, status_callback=st.write)
-                st.success("Training complete! Your bot is ready with the new knowledge.")
-        
-        if st.button("Reset to Foundational Knowledge"):
-            user_id = st.session_state.current_user_id
-            if not user_id:
-                st.error("Please start a user session first.")
-            else:
-                with st.spinner("Resetting knowledge base..."):
-                    user_db_path = os.path.join(USER_DB_PATH, user_id)
-                    if os.path.exists(user_db_path):
-                        shutil.rmtree(user_db_path)
-                    st.session_state.messages[user_id] = []
-                    st.session_state.user_data[user_id]["chat_history"] = []
-                st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
-
-    # --- Main Chat Interface ---
-    st.title("🤖 Personalized AI Chatbot")
-    st.caption("Your personal AI assistant. Upload documents in the sidebar to train it.")
-
-    if st.session_state.current_user_id:
+    if st.button("Build New Knowledge Base"):
         user_id = st.session_state.current_user_id
-        
-        for message in st.session_state.messages.get(user_id, []):
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        if not user_id:
+            st.error("Please start a user session first.")
+        elif not uploaded_files:
+            st.warning("Please upload at least one .docx document.")
+        else:
+            with st.spinner("Building new knowledge base... This may take several minutes."):
+                build_user_database(user_id, uploaded_files, status_callback=st.write)
+            st.success("Training complete! Your bot is ready with the new knowledge.")
+    
+    if st.button("Reset to Foundational Knowledge"):
+        user_id = st.session_state.current_user_id
+        if not user_id:
+            st.error("Please start a user session first.")
+        else:
+            with st.spinner("Resetting knowledge base..."):
+                user_db_path = os.path.join(USER_DB_PATH, user_id)
+                if os.path.exists(user_db_path):
+                    shutil.rmtree(user_db_path)
+                st.session_state.messages[user_id] = []
+                st.session_state.user_data[user_id]["chat_history"] = []
+            st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
 
-        if prompt := st.chat_input("Ask me anything..."):
-            st.session_state.messages[user_id].append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+# --- Main Chat Interface ---
+st.title("🤖 Personalized AI Chatbot")
+st.caption("Your personal AI assistant. Add your own documents in the sidebar to customize its knowledge.")
 
-            with st.chat_message("assistant"):
-                with st.spinner("Eva is thinking..."):
-                    current_user_data = st.session_state.user_data[user_id]
-                    response_text = asyncio.run(get_contextual_response(prompt, current_user_data, user_id))
-                    st.write(response_text)
+if st.session_state.current_user_id:
+    user_id = st.session_state.current_user_id
+    
+    for message in st.session_state.messages.get(user_id, []):
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            # --- MODIFIED: Cleaner source display ---
+            if message["role"] == "assistant" and "sources" in message and message["sources"]:
+                with st.expander("View Sources"):
+                    for source in message["sources"]:
+                        source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                        page_number = source.metadata.get('page', 'N/A')
+                        st.info(f"Reference: {source_name} (Page: {page_number})")
+                        # Display a snippet of the paragraph
+                        st.caption(f"> {source.page_content[:250]}...")
 
-            st.session_state.messages[user_id].append({"role": "assistant", "content": response_text})
-            current_user_data["chat_history"].extend([HumanMessage(content=prompt), AIMessage(content=response_text)])
-    else:
-        st.info("Please enter a User ID in the sidebar to begin.")
+    if prompt := st.chat_input("Ask me anything..."):
+        st.session_state.messages[user_id].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Eva is thinking..."):
+                current_user_data = st.session_state.user_data[user_id]
+                response_data = asyncio.run(get_contextual_response(prompt, current_user_data, user_id))
+                
+                response_text = response_data["answer"]
+                sources = response_data["sources"]
+                
+                st.write(response_text)
+
+                # --- MODIFIED: Cleaner source display for the latest response ---
+                if sources:
+                    with st.expander("View Sources"):
+                        for source in sources:
+                            source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                            page_number = source.metadata.get('page', 'N/A')
+                            st.info(f"Reference: {source_name} (Page: {page_number})")
+                            st.caption(f"> {source.page_content[:250]}...")
+
+        st.session_state.messages[user_id].append({
+            "role": "assistant", 
+            "content": response_text,
+            "sources": sources
+        })
+        current_user_data["chat_history"].extend([HumanMessage(content=prompt), AIMessage(content=response_text)])
+else:
+    st.info("Please enter a User ID in the sidebar to begin.")
