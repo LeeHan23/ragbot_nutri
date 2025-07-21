@@ -42,6 +42,7 @@ vectorstore_base/  # <-- ADD THIS LINE
 # Ignore the specific folders for user-uploaded content and sessions
 data/users/
 data/sessions/
+data/base_documents/
 temp_uploads/
 
 # Secrets - VERY IMPORTANT
