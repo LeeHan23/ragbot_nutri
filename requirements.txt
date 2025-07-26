@@ -1,16 +1,8 @@
-# --- FastAPI and Server ---
-fastapi
-uvicorn[standard]
-gunicorn
-python-dotenv
-python-multipart
-argparse
-
 # --- Web UI ---
 streamlit
-
-# --- WhatsApp Integration ---
-twilio
+streamlit-authenticator
+PyYAML
+bcrypt # New: For secure password hashing
 
 # --- AI and Language Model ---
 langchain
@@ -21,8 +13,6 @@ langchain-community
 chromadb
 
 # --- Document Processing ---
-python-docx
 pypdf
 docx2txt
-pymupdf # <-- ADD THIS LINE
 aiofiles

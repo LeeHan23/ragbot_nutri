@@ -2,100 +2,91 @@ import streamlit as st
 import asyncio
 import os
 import shutil
+import yaml
+from yaml.loader import SafeLoader
+import streamlit_authenticator as stauth
 from dotenv import load_dotenv
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
 from rag import get_contextual_response
-from langchain_core.messages import HumanMessage, AIMessage
+# Correctly import from knowledge_manager.py
 from knowledge_manager import build_user_database
 
 # --- Constants ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USER_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
+PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
+USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
+BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base")
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
-# --- Session State Management ---
-if "messages" not in st.session_state:
-    st.session_state.messages = {}
-if "user_data" not in st.session_state:
-    st.session_state.user_data = {}
-if "current_user_id" not in st.session_state:
-    st.session_state.current_user_id = None
+# --- User Authentication ---
+with open('config.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
 
-# --- Sidebar for User Management and Training ---
-with st.sidebar:
-    st.header("User & Knowledge Management")
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days'],
+    config['preauthorized']
+)
+
+# Render the login form
+name, authentication_status, username = authenticator.login('Login', 'main')
+
+# --- Main Application Logic ---
+if authentication_status:
+    # --- LOGGED IN ---
+    authenticator.logout('Logout', 'sidebar')
+    st.sidebar.title(f"Welcome *{name}*")
     
-    user_id_input = st.text_input("Enter your User ID to start chatting:", key="user_id_input")
-    if st.button("Start/Switch User Session"):
-        if user_id_input:
-            st.session_state.current_user_id = user_id_input
-            if user_id_input not in st.session_state.messages:
-                st.session_state.messages[user_id_input] = []
-                st.session_state.user_data[user_id_input] = {
-                    "chat_history": [], "visit_count": 1, "intent_summary": "User is starting a new conversation."
-                }
-            st.success(f"Session started for user: {user_id_input}")
-        else:
-            st.warning("Please enter a User ID.")
+    user_id = username # Use the authenticated username as the user_id
 
-    st.divider()
+    # Initialize session state for the logged-in user
+    if "messages" not in st.session_state:
+        st.session_state.messages = {}
+    if user_id not in st.session_state.messages:
+        st.session_state.messages[user_id] = []
 
-    st.header("Train Your Bot")
-    uploaded_files = st.file_uploader(
-        "Upload your .docx files to create a new knowledge base",
-        accept_multiple_files=True,
-        type=['docx']
-    )
+    # --- Sidebar for Knowledge Management ---
+    with st.sidebar:
+        st.header("Train Your Bot")
+        uploaded_files = st.file_uploader(
+            "Upload your .docx files to add to the bot's knowledge",
+            accept_multiple_files=True,
+            type=['docx']
+        )
 
-    if st.button("Build New Knowledge Base"):
-        user_id = st.session_state.current_user_id
-        if not user_id:
-            st.error("Please start a user session first.")
-        elif not uploaded_files:
-            st.warning("Please upload at least one .docx document.")
-        else:
-            with st.spinner("Building new knowledge base... This may take several minutes."):
-                build_user_database(user_id, uploaded_files, status_callback=st.write)
-            st.success("Training complete! Your bot is ready with the new knowledge.")
-    
-    if st.button("Reset to Foundational Knowledge"):
-        user_id = st.session_state.current_user_id
-        if not user_id:
-            st.error("Please start a user session first.")
-        else:
+        if st.button("Add Documents to Knowledge Base"):
+            if not uploaded_files:
+                st.warning("Please upload at least one .docx document.")
+            else:
+                with st.spinner("Adding new documents to your knowledge base..."):
+                    # This function now correctly copies the base and adds new docs
+                    build_user_database(user_id, uploaded_files, status_callback=st.write)
+                st.success("Training complete! Your bot has new knowledge.")
+        
+        if st.button("Reset to Foundational Knowledge"):
             with st.spinner("Resetting knowledge base..."):
                 user_db_path = os.path.join(USER_DB_PATH, user_id)
                 if os.path.exists(user_db_path):
                     shutil.rmtree(user_db_path)
-                st.session_state.messages[user_id] = []
-                st.session_state.user_data[user_id]["chat_history"] = []
+                st.session_state.messages[user_id] = [] # Clear chat history on reset
             st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
 
-# --- Main Chat Interface ---
-st.title("🤖 Personalized AI Chatbot")
-st.caption("Your personal AI assistant. Add your own documents in the sidebar to customize its knowledge.")
+    # --- Main Chat Interface ---
+    st.title("🤖 Personalized AI Chatbot")
+    st.caption(f"You are logged in as: {username}")
 
-if st.session_state.current_user_id:
-    user_id = st.session_state.current_user_id
-    
+    # Display chat messages
     for message in st.session_state.messages.get(user_id, []):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            # --- MODIFIED: Cleaner source display ---
-            if message["role"] == "assistant" and "sources" in message and message["sources"]:
-                with st.expander("View Sources"):
-                    for source in message["sources"]:
-                        source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
-                        page_number = source.metadata.get('page', 'N/A')
-                        st.info(f"Reference: {source_name} (Page: {page_number})")
-                        # Display a snippet of the paragraph
-                        st.caption(f"> {source.page_content[:250]}...")
 
+    # Handle user input
     if prompt := st.chat_input("Ask me anything..."):
         st.session_state.messages[user_id].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -103,28 +94,13 @@ if st.session_state.current_user_id:
 
         with st.chat_message("assistant"):
             with st.spinner("Eva is thinking..."):
-                current_user_data = st.session_state.user_data[user_id]
-                response_data = asyncio.run(get_contextual_response(prompt, current_user_data, user_id))
-                
-                response_text = response_data["answer"]
-                sources = response_data["sources"]
-                
+                response_data = asyncio.run(get_contextual_response(prompt, st.session_state.messages[user_id], user_id))
+                response_text = response_data.get("answer", "I'm sorry, an error occurred.")
                 st.write(response_text)
+        
+        st.session_state.messages[user_id].append({"role": "assistant", "content": response_text})
 
-                # --- MODIFIED: Cleaner source display for the latest response ---
-                if sources:
-                    with st.expander("View Sources"):
-                        for source in sources:
-                            source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
-                            page_number = source.metadata.get('page', 'N/A')
-                            st.info(f"Reference: {source_name} (Page: {page_number})")
-                            st.caption(f"> {source.page_content[:250]}...")
-
-        st.session_state.messages[user_id].append({
-            "role": "assistant", 
-            "content": response_text,
-            "sources": sources
-        })
-        current_user_data["chat_history"].extend([HumanMessage(content=prompt), AIMessage(content=response_text)])
-else:
-    st.info("Please enter a User ID in the sidebar to begin.")
+elif authentication_status == False:
+    st.error('Username/password is incorrect')
+elif authentication_status == None:
+    st.warning('Please enter your username and password')
