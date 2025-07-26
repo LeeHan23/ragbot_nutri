@@ -1,18 +1,16 @@
 import streamlit as st
-import asyncio
 import os
 import shutil
 import yaml
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from dotenv import load_dotenv
-import streamlit.components.v1 as components # New: For embedding HTML
+import streamlit.components.v1 as components
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
 from rag import get_contextual_response
-# Correctly import from knowledge_manager.py
 from knowledge_manager import build_user_database
 
 # --- Constants ---
@@ -30,19 +28,25 @@ goat_counter_script = """
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
 # --- User Authentication ---
-with open('config.yaml') as file:
-    config = yaml.load(file, Loader=SafeLoader)
+try:
+    with open('config.yaml') as file:
+        config = yaml.load(file, Loader=SafeLoader)
+    
+    authenticator = stauth.Authenticate(
+        config['credentials'],
+        config['cookie']['name'],
+        config['cookie']['key'],
+        config['cookie']['expiry_days'],
+        config['preauthorized']
+    )
 
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days'],
-    config['preauthorized']
-)
+    # Render the login form
+    name, authentication_status, username = authenticator.login('Login', 'main')
 
-# Render the login form
-name, authentication_status, username = authenticator.login('Login', 'main')
+except FileNotFoundError:
+    st.error("Authentication configuration file (`config.yaml`) not found.")
+    st.stop()
+
 
 # --- Main Application Logic ---
 if authentication_status:
@@ -66,19 +70,18 @@ if authentication_status:
     with st.sidebar:
         st.header("Train Your Bot")
         uploaded_files = st.file_uploader(
-            "Upload your .docx files to add to the bot's knowledge",
+            "Upload your .docx files to create a custom knowledge base",
             accept_multiple_files=True,
             type=['docx']
         )
 
-        if st.button("Add Documents to Knowledge Base"):
+        if st.button("Build Custom Knowledge Base"):
             if not uploaded_files:
                 st.warning("Please upload at least one .docx document.")
             else:
-                with st.spinner("Adding new documents to your knowledge base..."):
-                    # This function now correctly copies the base and adds new docs
+                with st.spinner("Building your custom knowledge base..."):
                     build_user_database(user_id, uploaded_files, status_callback=st.write)
-                st.success("Training complete! Your bot has new knowledge.")
+                st.success("Training complete! Your custom knowledge base is ready.")
         
         if st.button("Reset to Foundational Knowledge"):
             with st.spinner("Resetting knowledge base..."):
@@ -105,8 +108,9 @@ if authentication_status:
 
         with st.chat_message("assistant"):
             with st.spinner("Eva is thinking..."):
-                response_data = asyncio.run(get_contextual_response(prompt, st.session_state.messages[user_id], user_id))
-                response_text = response_data.get("answer", "I'm sorry, an error occurred.")
+                # Pass the simple list of dictionaries directly
+                response_data = get_contextual_response(prompt, st.session_state.messages[user_id], user_id)
+                response_text = response_data.get("answer", "I'm sorry, I encountered an issue. Please rephrase?")
                 st.write(response_text)
         
         st.session_state.messages[user_id].append({"role": "assistant", "content": response_text})
