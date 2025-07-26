@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from operator import itemgetter # New: Import itemgetter
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -69,13 +70,14 @@ def get_contextual_response(user_question: str, chat_history: list, user_id: str
         prompt = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
         llm = ChatOpenAI(model_name=MODEL_NAME, temperature=0.7)
 
-        # This chain manually performs the steps for clarity and reliability
+        # This chain explicitly pipes the 'question' to the retriever
         rag_chain = (
             {
-                "context": retriever, 
-                "question": RunnablePassthrough(),
-                "chat_history": RunnablePassthrough(),
-                "persona_instructions": RunnablePassthrough()
+                # CORRECTED: Use itemgetter to pass only the question to the retriever
+                "context": itemgetter("question") | retriever, 
+                "question": itemgetter("question"),
+                "chat_history": itemgetter("chat_history"),
+                "persona_instructions": itemgetter("persona_instructions")
             }
             | prompt
             | llm
@@ -85,7 +87,7 @@ def get_contextual_response(user_question: str, chat_history: list, user_id: str
         # Format the chat history for the prompt
         formatted_history = format_chat_history(chat_history)
 
-        # Invoke the chain with all necessary inputs
+        # Invoke the chain with all necessary inputs in a single dictionary
         response = rag_chain.invoke({
             "question": user_question,
             "chat_history": formatted_history,
