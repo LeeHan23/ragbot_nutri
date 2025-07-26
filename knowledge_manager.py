@@ -1,6 +1,6 @@
 import os
 import shutil
-import argparse
+import time
 from dotenv import load_dotenv
 
 # --- Load environment variables from .env file FIRST ---
@@ -9,21 +9,49 @@ load_dotenv()
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 
 # --- Constants ---
-# Correctly point to the persistent disk path provided by the environment
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+BASE_DOCS_PATH = os.path.join(DATA_DIR, "base_documents")
+
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
 USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 COLLECTION_NAME = "user_knowledge"
-# Define a local temporary directory for file processing
-TEMP_UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_uploads")
 
+# --- NEW: Function to load persona and promo instructions ---
+def get_prompts():
+    """Loads the latest instruction and promo files."""
+    instructions_path = os.path.join(DATA_DIR, "instructions")
+    promos_path = os.path.join(DATA_DIR, "promos")
+
+    # Load instructions
+    instruction_docs = []
+    if os.path.exists(instructions_path):
+        for filename in os.listdir(instructions_path):
+            if filename.endswith(".docx"):
+                loader = Docx2txtLoader(os.path.join(instructions_path, filename))
+                instruction_docs.extend(loader.load())
+    
+    # Load promos
+    promo_docs = []
+    if os.path.exists(promos_path):
+        for filename in os.listdir(promos_path):
+            if filename.endswith(".docx"):
+                loader = Docx2txtLoader(os.path.join(promos_path, filename))
+                promo_docs.extend(loader.load())
+
+    instructions_text = "\n\n".join([doc.page_content for doc in instruction_docs]) if instruction_docs else "No special instructions provided."
+    promos_text = "\n\n".join([doc.page_content for doc in promo_docs]) if promo_docs else "No active promotions."
+    
+    return instructions_text, promos_text
 
 def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
-    Builds a user-specific knowledge base containing ONLY the user's uploaded documents.
-    This is a much faster and more memory-efficient process that avoids file-locking errors.
+    Builds a user-specific knowledge base by combining the foundational PDF knowledge
+    with the user's newly uploaded DOCX files.
+    This creates the database in a single, robust operation.
     
     Args:
         user_id (str): The unique identifier for the user.
@@ -36,21 +64,35 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
 
     user_db_path = os.path.join(USER_DB_PATH, user_id)
     
-    if status_callback: status_callback(f"--- Starting new custom build for user: {user_id} ---")
+    if status_callback: status_callback(f"--- Starting new build for user: {user_id} ---")
 
-    # 1. Clear any existing custom database for this user to ensure a fresh start
+    # 1. Clear any existing database for this user to ensure a fresh start
     if os.path.exists(user_db_path):
-        if status_callback: status_callback("Clearing old custom knowledge base...")
+        if status_callback: status_callback("Clearing old knowledge base...")
         shutil.rmtree(user_db_path)
+        time.sleep(1) # Add a small delay to ensure the directory is fully removed
 
-    # 2. Load the user's newly uploaded documents
-    if status_callback: status_callback("Loading user documents...")
+    # 2. Load all documents (base PDFs + uploaded DOCX) into memory
+    if status_callback: status_callback("Loading documents...")
     all_docs = []
-    os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True) # Ensure temp directory exists
+    
+    # Load base documents
+    if os.path.exists(BASE_DOCS_PATH):
+        for filename in os.listdir(BASE_DOCS_PATH):
+            if filename.endswith(".pdf"):
+                try:
+                    loader = PyPDFLoader(os.path.join(BASE_DOCS_PATH, filename))
+                    all_docs.extend(loader.load())
+                except Exception as e:
+                    if status_callback: status_callback(f"Warning: Could not load base file {filename}. Error: {e}")
+
+    # Load user-uploaded documents
     for file_obj in uploaded_docx_files:
         try:
             # Create a temporary path to load the document
-            temp_path = os.path.join(TEMP_UPLOADS_DIR, file_obj.name)
+            temp_dir = os.path.join(BASE_DIR, "temp_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_path = os.path.join(temp_dir, file_obj.name)
             with open(temp_path, "wb") as f:
                 f.write(file_obj.getvalue())
             
@@ -59,13 +101,11 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
             
             # Clean up the temporary file
             os.remove(temp_path)
+            if not os.listdir(temp_dir):
+                os.rmdir(temp_dir)
         except Exception as e:
             if status_callback: status_callback(f"Error loading uploaded file {file_obj.name}: {e}")
             continue
-    
-    # Clean up temp directory if it's empty
-    if os.path.exists(TEMP_UPLOADS_DIR) and not os.listdir(TEMP_UPLOADS_DIR):
-        os.rmdir(TEMP_UPLOADS_DIR)
 
     if not all_docs:
         if status_callback: status_callback("No documents found to process.")
@@ -76,9 +116,9 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     chunks = text_splitter.split_documents(all_docs)
     if status_callback: status_callback(f"Split documents into {len(chunks)} chunks.")
 
-    # 4. Create the new user-specific database in a single, robust operation
+    # 4. Create the new database in a single, robust operation
     if chunks:
-        if status_callback: status_callback("Embedding documents...")
+        if status_callback: status_callback(f"Embedding documents... This may take a while depending on the number of documents.")
         embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002", max_retries=6, chunk_size=500)
         
         Chroma.from_documents(
@@ -88,9 +128,6 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
             collection_name=COLLECTION_NAME
         )
         
-        if status_callback: status_callback("✅ Training complete! Your custom knowledge base is ready.")
+        if status_callback: status_callback("✅ Training complete! Your knowledge base is ready.")
     else:
-        if status_callback: status_callback("No content found in documents to train on.")
-
-if __name__ == "__main__":
-    print("This script is primarily intended to be called from the UI.")
+        if status_callback: status_callback("No content to train on after processing files.")
