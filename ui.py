@@ -79,7 +79,7 @@ if authentication_status:
             if not uploaded_files:
                 st.warning("Please upload at least one .docx document.")
             else:
-                with st.spinner("Building your custom knowledge base..."):
+                with st.spinner("Building your custom knowledge base... This will create a separate DB with only your documents."):
                     build_user_database(user_id, uploaded_files, status_callback=st.write)
                 st.success("Training complete! Your custom knowledge base is ready.")
         
@@ -109,8 +109,8 @@ if authentication_status:
         with st.chat_message("assistant"):
             with st.spinner("Eva is thinking..."):
                 # Pass the simple list of dictionaries directly
-                response_data = get_contextual_response(prompt, st.session_state.messages[user_id], user_id)
-                response_text = response_data.get("answer", "I'm sorry, I encountered an issue. Please rephrase?")
+                # CORRECTED: The response is now a simple string
+                response_text = get_contextual_response(prompt, st.session_state.messages[user_id], user_id)
                 st.write(response_text)
         
         st.session_state.messages[user_id].append({"role": "assistant", "content": response_text})
