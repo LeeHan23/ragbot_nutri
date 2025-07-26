@@ -1,6 +1,5 @@
 import os
 from dotenv import load_dotenv
-from operator import itemgetter # New: Import itemgetter
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -66,20 +65,16 @@ def get_contextual_response(user_question: str, chat_history: list, user_id: str
         # 2. Load the persona and promotion instructions
         instructions, _ = get_prompts() # We only need the persona instructions here
 
-        # 3. Define the RAG chain using LangChain Expression Language (LCEL)
+        # 3. Manually retrieve the relevant documents first
+        retrieved_docs = retriever.invoke(user_question)
+        context = "\n\n---\n\n".join([doc.page_content for doc in retrieved_docs])
+
+        # 4. Define a simpler chain that just focuses on generating a response
         prompt = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
         llm = ChatOpenAI(model_name=MODEL_NAME, temperature=0.7)
 
-        # This chain explicitly pipes the 'question' to the retriever
         rag_chain = (
-            {
-                # CORRECTED: Use itemgetter to pass only the question to the retriever
-                "context": itemgetter("question") | retriever, 
-                "question": itemgetter("question"),
-                "chat_history": itemgetter("chat_history"),
-                "persona_instructions": itemgetter("persona_instructions")
-            }
-            | prompt
+            prompt
             | llm
             | StrOutputParser()
         )
@@ -91,7 +86,8 @@ def get_contextual_response(user_question: str, chat_history: list, user_id: str
         response = rag_chain.invoke({
             "question": user_question,
             "chat_history": formatted_history,
-            "persona_instructions": instructions
+            "persona_instructions": instructions,
+            "context": context # Pass in the context we retrieved manually
         })
         
         # Return the response in the dictionary format the UI expects
