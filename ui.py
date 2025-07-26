@@ -6,6 +6,7 @@ import yaml
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from dotenv import load_dotenv
+import streamlit.components.v1 as components # New: For embedding HTML
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
@@ -18,6 +19,12 @@ from knowledge_manager import build_user_database
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
 USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base")
+
+# --- GoatCounter Tracking Script ---
+goat_counter_script = """
+<script data-goatcounter="https://han233.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+"""
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
@@ -40,6 +47,10 @@ name, authentication_status, username = authenticator.login('Login', 'main')
 # --- Main Application Logic ---
 if authentication_status:
     # --- LOGGED IN ---
+    
+    # Inject GoatCounter script invisibly
+    components.html(goat_counter_script, height=0)
+
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.title(f"Welcome *{name}*")
     
