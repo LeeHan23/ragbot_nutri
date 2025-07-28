@@ -32,7 +32,6 @@ try:
     with open('config.yaml') as file:
         config = yaml.load(file, Loader=SafeLoader)
     
-    # CORRECTED: The 'preauthorized' parameter has been removed as it is deprecated.
     authenticator = stauth.Authenticate(
         config['credentials'],
         config['cookie']['name'],
@@ -40,8 +39,8 @@ try:
         config['cookie']['expiry_days']
     )
 
-    # Render the login form
-    name, authentication_status, username = authenticator.login('Login', 'main')
+    # CORRECTED: Use the explicit 'location' keyword argument for clarity and compatibility.
+    name, authentication_status, username = authenticator.login(location='main')
 
 except FileNotFoundError:
     st.error("Authentication configuration file (`config.yaml`) not found.")
