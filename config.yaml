@@ -3,12 +3,12 @@ credentials:
     jsmith:
       email: jsmith@gmail.com
       name: John Smith
-      password: '$2b$12$.fReYMYmQnJIuItMK6BxheV4ZzguPToLv3m38iPwwG.SDepaTgZi.' # To be replaced
+      password: '$2b$12$.28wq1nsQpa2pKvNj79E/OhpJz1wJ0Z.DmQURd/GI/XdyVidlyJ5a'
     rdoe:
       email: rdoe@gmail.com
       name: Rebecca Doe
-      password: '$2b$12$VOLSYMakYuZnHFIDREluVOOdTtWgvFHpKYj9z7.ytR6ZU8WSpEdZG' # To be replaced
+      password: '$2b$12$jqw5L8yf72SQSKTgWqA33.RiZzI23xNwHNUZDXGs7zwVwKslp7J.e'
 cookie:
   expiry_days: 30
-  key: some_signature_key # can be any random string
-  name: some_cookie_name
+  key: a_very_secret_random_key_123 # Replace with a random string
+  name: nutrition_bot_cookie
