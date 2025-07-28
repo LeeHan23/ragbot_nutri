@@ -3,11 +3,11 @@ credentials:
     jsmith:
       email: jsmith@gmail.com
       name: John Smith
-      password: 'REPLACE_WITH_HASHED_PASSWORD_1' # To be replaced
+      password: '$2b$12$fF/YVHKjbAhTlQZ/YgGBw.oRlQG9AZyr5E6zV6YAA/7Pf4AUz.H2i' # To be replaced
     rdoe:
       email: rdoe@gmail.com
       name: Rebecca Doe
-      password: 'REPLACE_WITH_HASHED_PASSWORD_2' # To be replaced
+      password: '$2b$12$r53r9XckFLUCsH5g0L70Oe5e.ONmkioWObp0WuQ81iREKPX5PH0r2' # To be replaced
 cookie:
   expiry_days: 30
   key: some_signature_key # can be any random string
