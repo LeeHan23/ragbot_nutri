@@ -3,7 +3,7 @@ credentials:
     jsmith:
       email: jsmith@gmail.com
       name: John Smith
-      password: '$2b$12$.fReYMYmQnJIuItMK6BxheV4ZzguPToLv3m38iPwwG.SDepaTgZi. # To be replaced
+      password: '$2b$12$.fReYMYmQnJIuItMK6BxheV4ZzguPToLv3m38iPwwG.SDepaTgZi.' # To be replaced
     rdoe:
       email: rdoe@gmail.com
       name: Rebecca Doe
