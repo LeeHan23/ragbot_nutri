@@ -1,17 +1,14 @@
 credentials:
   usernames:
-    jsmith: # This is the username
-      email: jsmith@example.com
+    jsmith:
+      email: jsmith@gmail.com
       name: John Smith
-      password: '$2b$12$fF/YVHKjbAhTlQZ/YgGBw.oRlQG9AZyr5E6zV6YAA/7Pf4AUz.H2i' # This will be the HASHED password
+      password: 'REPLACE_WITH_HASHED_PASSWORD_1' # To be replaced
     rdoe:
-      email: rdoe@example.com
+      email: rdoe@gmail.com
       name: Rebecca Doe
-      password: '$2b$12$r53r9XckFLUCsH5g0L70Oe5e.ONmkioWObp0WuQ81iREKPX5PH0r2'
+      password: 'REPLACE_WITH_HASHED_PASSWORD_2' # To be replaced
 cookie:
   expiry_days: 30
-  key: 'some_signature_key' # Change this to a random secret key
-  name: 'some_cookie_name'
-preauthorized:
-  emails:
-  - melsmith@gmail.com
+  key: some_signature_key # can be any random string
+  name: some_cookie_name

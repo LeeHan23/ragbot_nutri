@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 load_dotenv()
 
 from rag import get_contextual_response
-from knowledge_manager import build_user_database
+from knowledge_manager import build_user_database, get_prompts
 
 # --- Constants ---
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
@@ -32,12 +32,12 @@ try:
     with open('config.yaml') as file:
         config = yaml.load(file, Loader=SafeLoader)
     
+    # CORRECTED: The 'preauthorized' parameter has been removed as it is deprecated.
     authenticator = stauth.Authenticate(
         config['credentials'],
         config['cookie']['name'],
         config['cookie']['key'],
-        config['cookie']['expiry_days'],
-        config['preauthorized']
+        config['cookie']['expiry_days']
     )
 
     # Render the login form
@@ -45,6 +45,9 @@ try:
 
 except FileNotFoundError:
     st.error("Authentication configuration file (`config.yaml`) not found.")
+    st.stop()
+except Exception as e:
+    st.error(f"An error occurred during authentication setup: {e}")
     st.stop()
 
 
@@ -79,7 +82,7 @@ if authentication_status:
             if not uploaded_files:
                 st.warning("Please upload at least one .docx document.")
             else:
-                with st.spinner("Building your custom knowledge base... This will create a separate DB with only your documents."):
+                with st.spinner("Building your custom knowledge base..."):
                     build_user_database(user_id, uploaded_files, status_callback=st.write)
                 st.success("Training complete! Your custom knowledge base is ready.")
         
@@ -108,8 +111,6 @@ if authentication_status:
 
         with st.chat_message("assistant"):
             with st.spinner("Eva is thinking..."):
-                # Pass the simple list of dictionaries directly
-                # CORRECTED: The response is now a simple string
                 response_text = get_contextual_response(prompt, st.session_state.messages[user_id], user_id)
                 st.write(response_text)
         
