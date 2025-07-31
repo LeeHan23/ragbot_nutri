@@ -1,7 +1,5 @@
 # --- Web UI ---
 streamlit
-streamlit-authenticator
-PyYAML
 bcrypt # New: For secure password hashing
 
 # --- AI and Language Model ---
@@ -15,4 +13,9 @@ chromadb
 # --- Document Processing ---
 pypdf
 docx2txt
+pymupdf
+
+# --- Other ---
+python-dotenv
 aiofiles
+argparse
