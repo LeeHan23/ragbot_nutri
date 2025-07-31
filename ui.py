@@ -23,6 +23,9 @@ st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layou
 # --- Database Authentication Functions ---
 def check_login(username, password):
     """Checks user credentials against the database."""
+    if not os.path.exists(DB_PATH):
+        return False, None # Database hasn't been created yet
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT password, name FROM users WHERE username = ?", (username,))
