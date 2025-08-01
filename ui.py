@@ -10,11 +10,10 @@ load_dotenv()
 from rag import get_contextual_response
 from knowledge_manager import build_user_database
 # Import the new database functions
-from database import add_user, check_login, verify_user, create_user_table # <-- ADD create_user_table
+from database import add_user, check_login, verify_user, create_user_table
 
 # --- INITIALIZE DATABASE ---
-# This is a critical step. It ensures the users.db file and the users table
-# are created the first time the application starts on the server.
+# This ensures the users.db file and the users table are created on startup.
 create_user_table()
 
 # --- Constants ---
