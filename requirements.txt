@@ -1,5 +1,6 @@
 # --- Web UI ---
 streamlit
+streamlit-authenticator
 bcrypt # New: For secure password hashing
 
 # --- AI and Language Model ---
