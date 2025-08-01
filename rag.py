@@ -1,100 +1,125 @@
 import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.messages import HumanMessage, AIMessage
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
+from typing import Dict, Any
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+
+# Import functions from other modules
 from vector_store import get_retriever
-from knowledge_manager import get_prompts
+from llm import get_llm
 
 # --- Constants ---
-MODEL_NAME = "gpt-3.5-turbo"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
+INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
 
-# --- RAG Prompt Template ---
-# This is the core instruction set for the AI model.
-RAG_PROMPT_TEMPLATE = """
-### INSTRUCTIONS TO BOT ###
-You are a helpful and professional AI assistant.
-Your persona and specific instructions are defined by the text in the [PERSONA INSTRUCTIONS] section below.
-Your primary goal is to answer the user's question based on the information provided in the [CONTEXTUAL KNOWLEDGE BASE].
-If the knowledge base does not contain the answer, rely on your general training but strictly adhere to your persona, especially the rules about not giving advice.
+# --- Helper Function (Unchanged) ---
+def _load_latest_text_file(directory: str, default_text: str = "Not available.") -> str:
+    """Loads content from the most recently created/modified text file in a directory."""
+    if not os.path.exists(directory) or not os.listdir(directory):
+        return default_text
+    try:
+        files = [os.path.join(directory, f) for f in os.listdir(directory)]
+        files.sort(key=os.path.getmtime, reverse=True)
+        latest_file = files[0]
+        with open(latest_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"Error loading latest file from {directory}: {e}")
+        return default_text
 
-### PERSONA INSTRUCTIONS ###
-{persona_instructions}
-
-### CONTEXTUAL KNOWLEDGE BASE (Your source of truth) ###
-{context}
-
-### CURRENT CONVERSATION (Your short-term memory) ###
-{chat_history}
-
-### USER'S LATEST MESSAGE ###
-Question: {question}
-
-### YOUR RESPONSE ###
-Answer:
-"""
-
-# --- Core RAG Logic ---
-
-def format_chat_history(chat_history: list) -> str:
-    """Formats the chat history into a readable string for the prompt."""
-    if not chat_history:
-        return "No conversation history yet."
-    
-    formatted_history = []
-    for message in chat_history:
-        role = "User" if message['role'] == 'user' else "Assistant"
-        formatted_history.append(f"{role}: {message['content']}")
-    return "\n".join(formatted_history)
-
-def get_contextual_response(user_question: str, chat_history: list, user_id: str):
+# --- Main RAG Pipeline ---
+async def get_contextual_response(user_message: str, user_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    This is the main function that generates the bot's response.
-    It retrieves context, builds a prompt, and calls the AI model.
+    Gets a contextual response and the source documents used to generate it.
     """
     try:
-        # 1. Get the appropriate retriever (custom or base)
+        print(f"--- Invoking LCEL Chain for user: {user_id} ---")
+        
+        llm = get_llm()
         retriever = get_retriever(user_id)
+
+        # 1. Prompt to rephrase a follow-up question
+        contextualize_q_system_prompt = """Given a chat history and the latest user question \
+        which might reference context in the chat history, formulate a standalone question \
+        which can be understood without the chat history. Do NOT answer the question, \
+        just reformulate it if needed and otherwise return it as is."""
         
-        # 2. Load the persona and promotion instructions
-        instructions, _ = get_prompts() # We only need the persona instructions here
-
-        # 3. Manually retrieve the relevant documents first
-        retrieved_docs = retriever.invoke(user_question)
-        context = "\n\n---\n\n".join([doc.page_content for doc in retrieved_docs])
-
-        # 4. Define a simpler chain that just focuses on generating a response
-        prompt = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
-        llm = ChatOpenAI(model_name=MODEL_NAME, temperature=0.7)
-
-        rag_chain = (
-            prompt
-            | llm
-            | StrOutputParser()
+        contextualize_q_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", contextualize_q_system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
         )
-        
-        # Format the chat history for the prompt
-        formatted_history = format_chat_history(chat_history)
+        history_aware_retriever = create_history_aware_retriever(
+            llm, retriever, contextualize_q_prompt
+        )
 
-        # Invoke the chain with all necessary inputs in a single dictionary
-        response = rag_chain.invoke({
-            "question": user_question,
-            "chat_history": formatted_history,
-            "persona_instructions": instructions,
-            "context": context # Pass in the context we retrieved manually
+        # 2. Main prompt to answer the question
+        system_prompt = """
+        You are "Eva," an expert wellness assistant. Your goal is to have a personalized, stateful conversation.
+        Your personality and response style are strictly defined by the detailed instructions below.
+        You MUST have a natural, back-and-forth conversation, breaking your response into short, individual messages using newlines (\\n).
+        Use the chat history to understand the context of the conversation and the user metadata to personalize your greeting and responses.
+
+        **USER METADATA (Your long-term memory of the user):**
+        - Visit Count: {visit_count}
+        - Summary of Past Interests: {intent_summary}
+
+        **PERSONA AND BEHAVIOR INSTRUCTIONS:**
+        {behavior_instructions}
+
+        **ACTIVE PROMOTIONS/DISCOUNTS:**
+        {promo_text}
+
+        **CONTEXTUAL KNOWLEDGE BASE (Your source of truth):**
+        {context}
+
+        Based on ALL of the above, provide a comprehensive, natural, and helpful response.
+        """
+        
+        qa_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+
+        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+        
+        # This is the final chain that ties everything together.
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        
+        # Invoke the chain with all necessary inputs
+        result = await rag_chain.ainvoke({
+            "input": user_message,
+            "chat_history": user_data.get("chat_history", []),
+            "visit_count": user_data.get("visit_count", 1),
+            "intent_summary": user_data.get("intent_summary", "No interactions yet."),
+            "behavior_instructions": _load_latest_text_file(INSTRUCTIONS_PATH, "Be friendly."),
+            "promo_text": _load_latest_text_file(PROMOS_PATH, "No active promotions."),
         })
         
-        # Return the response in the dictionary format the UI expects
-        return {"answer": response}
+        return {
+            "answer": result.get("answer", "I'm not sure how to respond to that."),
+            "sources": result.get("context", [])
+        }
 
+    except FileNotFoundError:
+        return {
+            "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
+            "sources": []
+        }
     except Exception as e:
-        print(f"ERROR in get_contextual_response: {e}")
-        # In case of any failure, return a user-friendly error message
-        return {"answer": "I'm sorry, I've encountered an issue and can't respond right now. Please try again later."}
-
+        print(f"Error invoking conversational chain: {e}")
+        return {
+            "answer": "I'm sorry, I encountered an issue. Could you please rephrase?",
+            "sources": []
+        }
