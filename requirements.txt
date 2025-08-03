@@ -1,7 +1,18 @@
+# --- FastAPI and Server ---
+fastapi
+uvicorn[standard]
+gunicorn
+python-dotenv
+python-multipart
+argparse
+
 # --- Web UI ---
 streamlit
-streamlit-authenticator
-bcrypt # New: For secure password hashing
+streamlit-authenticator # <-- ADD THIS LINE
+PyYAML                  # <-- ADD THIS LINE
+
+# --- WhatsApp Integration ---
+twilio
 
 # --- AI and Language Model ---
 langchain
@@ -12,11 +23,8 @@ langchain-community
 chromadb
 
 # --- Document Processing ---
+python-docx
 pypdf
 docx2txt
-pymupdf
-
-# --- Other ---
-python-dotenv
 aiofiles
-argparse
+pymupdf
