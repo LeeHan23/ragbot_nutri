@@ -1,7 +1,7 @@
 import os
 import shutil
 import argparse
-import chromadb # <-- 1. ADD THIS IMPORT
+import chromadb # <-- This import is still needed
 from dotenv import load_dotenv
 
 # --- Load environment variables from .env file FIRST ---
@@ -13,7 +13,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader
 
 # --- Constants ---
-# (Constants section remains the same)
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
 USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 COLLECTION_NAME = "user_knowledge"
@@ -24,7 +23,6 @@ INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
 
 
 # --- Prompt Loading Functions ---
-# (_get_latest_file_content and get_prompts functions remain the same)
 def _get_latest_file_content(directory: str) -> str:
     """
     Finds the most recently modified .txt file in a directory and returns its content.
@@ -80,13 +78,17 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     
     if status_callback: status_callback(f"--- Starting new custom build for user: {user_id} ---")
 
+    # --- FIX: Instantiate a client and call reset() on it to release file locks ---
+    # This forces all connections to close before we try to delete the directory.
+    if status_callback: status_callback("Resetting database connection...")
+    chromadb.Client().reset()
+
     # 1. Clear any existing custom database for this user to ensure a fresh start
     if os.path.exists(user_db_path):
         if status_callback: status_callback("Clearing old custom knowledge base...")
         shutil.rmtree(user_db_path)
 
     # 2. Load the user's newly uploaded documents
-    # (Document loading logic remains the same)
     if status_callback: status_callback("Loading user documents...")
     all_docs = []
     os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True)
@@ -121,9 +123,6 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
         if status_callback: status_callback("Embedding documents...")
         embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002", max_retries=6, chunk_size=500)
         
-        # --- FIX: Reset the Chroma client to release any file locks ---
-        chromadb.reset() # <-- 2. ADD THIS LINE
-        
         Chroma.from_documents(
             documents=chunks,
             embedding=embedding_function,
@@ -137,4 +136,3 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
 
 if __name__ == "__main__":
     print("This script is primarily intended to be called from the UI.")
-
