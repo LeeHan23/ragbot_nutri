@@ -16,9 +16,70 @@ from langchain_community.document_loaders import Docx2txtLoader
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
 USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 COLLECTION_NAME = "user_knowledge"
-# Define a local temporary directory for file processing
-TEMP_UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_uploads")
 
+# Define a local temporary directory for file processing
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_UPLOADS_DIR = os.path.join(BASE_DIR, "temp_uploads")
+
+# Define paths for prompts, consistent with admin.py
+PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
+INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
+
+
+# --- Prompt Loading Functions ---
+
+def _get_latest_file_content(directory: str) -> str:
+    """
+    Finds the most recently modified .txt file in a directory and returns its content.
+    """
+    try:
+        # Ensure the directory exists before trying to list its contents
+        if not os.path.exists(directory):
+            print(f"Directory not found: {directory}")
+            return ""
+            
+        files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".txt")]
+        if not files:
+            return ""  # Return empty string if no .txt files are found
+        
+        latest_file = max(files, key=os.path.getmtime)
+        
+        with open(latest_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+            
+    except Exception as e:
+        print(f"Error reading from {directory}: {e}")
+        return ""
+
+def get_prompts() -> tuple[str, str]:
+    """
+    Loads the content of the latest persona instructions and promotions files.
+    This function is imported by rag.py to build the AI's prompt.
+    
+    Returns:
+        A tuple containing (instructions, promotions).
+    """
+    print("Loading persona instructions and latest promotions...")
+    
+    instructions = _get_latest_file_content(INSTRUCTIONS_PATH)
+    promotions = _get_latest_file_content(PROMOS_PATH)
+    
+    # Provide default text if files are empty or not found
+    if not instructions:
+        instructions = "You are a helpful general assistant. Since no specific instructions were provided, answer questions concisely."
+    if not promotions:
+        promotions = "There are no special promotions at this time."
+        
+    # Combine promotions into the main instructions for a complete context
+    full_instructions = f"{instructions}\n\n[LATEST PROMOTIONS & OFFERS]\n{promotions}"
+    
+    # The function signature in rag.py expects two values. 
+    # We return the combined instructions and an empty string for the second value
+    # to maintain compatibility without needing to change rag.py.
+    return full_instructions, ""
+
+
+# --- Knowledge Base Building Functions ---
 
 def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
@@ -94,3 +155,4 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
 
 if __name__ == "__main__":
     print("This script is primarily intended to be called from the UI.")
+
