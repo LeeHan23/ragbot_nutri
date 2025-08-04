@@ -66,8 +66,8 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
     try:
         print(f"--- Invoking Direct RAG Chain for user: {user_id} ---")
         
-        # 1. Get the appropriate retriever (custom or base)
-        retriever = get_retriever(user_id)
+        # 1. Get the appropriate retriever and the name of the knowledge source
+        retriever, knowledge_source = get_retriever(user_id)
         
         # 2. Retrieve relevant documents from the knowledge base
         retrieved_docs = retriever.invoke(user_question)
@@ -92,20 +92,23 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         llm = get_llm()
         response = await llm.ainvoke(final_prompt)
         
-        # 7. Return the response and sources
+        # 7. Return the response, sources, and knowledge source name
         return {
             "answer": response.content,
-            "sources": retrieved_docs
+            "sources": retrieved_docs,
+            "knowledge_source": knowledge_source
         }
 
     except FileNotFoundError:
         return {
             "answer": "It looks like I don't have a knowledge base for you yet. Please upload some documents to get started!",
-            "sources": []
+            "sources": [],
+            "knowledge_source": "None"
         }
     except Exception as e:
         print(f"ERROR in get_contextual_response: {e}")
         return {
             "answer": "I'm sorry, I've encountered a critical issue and can't respond right now. Please try again later.",
-            "sources": []
+            "sources": [],
+            "knowledge_source": "Error"
         }

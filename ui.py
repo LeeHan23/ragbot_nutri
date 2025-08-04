@@ -9,7 +9,7 @@ load_dotenv()
 
 from rag import get_contextual_response
 from knowledge_manager import build_user_database
-from database import add_user, check_login, verify_user # <-- Import custom DB functions
+from database import add_user, check_login, verify_user
 from langchain_core.messages import HumanMessage, AIMessage
 
 # --- Constants ---
@@ -20,7 +20,6 @@ USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
 # --- Initialize Session State ---
-# This ensures that the keys exist before we access them.
 if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
 if "name" not in st.session_state:
@@ -29,10 +28,15 @@ if "username" not in st.session_state:
     st.session_state["username"] = None
 if "messages" not in st.session_state:
     st.session_state.messages = {}
+# Add state to manage the verification step
+if "requires_verification" not in st.session_state:
+    st.session_state["requires_verification"] = False
+if "username_for_verification" not in st.session_state:
+    st.session_state["username_for_verification"] = ""
+
 
 # --- Authentication and Main App Logic ---
 
-# If user is not authenticated, show the login/signup page
 if not st.session_state["authentication_status"]:
     st.title("Welcome to the Personalized AI Nutrition Chatbot")
     
@@ -40,6 +44,8 @@ if not st.session_state["authentication_status"]:
     
     if choice == "Sign Up":
         st.subheader("Create a New Account")
+        # Ensure verification state is reset when switching to Sign Up
+        st.session_state["requires_verification"] = False 
         with st.form("Sign Up Form"):
             new_name = st.text_input("Full Name")
             new_username = st.text_input("Username")
@@ -59,39 +65,57 @@ if not st.session_state["authentication_status"]:
 
     else: # Login
         st.subheader("Login to Your Account")
-        with st.form("Login Form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login")
-
-            if submitted:
-                success, user_name, is_verified = check_login(username, password)
+        
+        # --- FIX: The verification UI is now outside the form ---
+        if st.session_state.get("requires_verification"):
+            st.info("This is your first login. Please enter your verification key to continue.")
+            
+            verification_key = st.text_input("One-Time Verification Key")
+            
+            if st.button("Verify and Login"):
+                username_to_verify = st.session_state["username_for_verification"]
+                # We need to re-check the user's name from the DB to log them in
+                success, user_name, is_verified = check_login(username_to_verify, "") # We can pass an empty password as we are verifying with a key
                 
-                if success:
-                    if is_verified:
-                        # Standard login
-                        st.session_state["authentication_status"] = True
-                        st.session_state["name"] = user_name
-                        st.session_state["username"] = username
-                        st.rerun()
-                    else:
-                        # First-time login, requires verification
-                        st.info("This is your first login. Please enter your verification key.")
-                        verification_key = st.text_input("One-Time Verification Key")
-                        if st.button("Verify and Login"):
-                            if verify_user(username, verification_key):
-                                st.session_state["authentication_status"] = True
-                                st.session_state["name"] = user_name
-                                st.session_state["username"] = username
-                                st.rerun()
-                            else:
-                                st.error("Verification key is incorrect.")
+                if verify_user(username_to_verify, verification_key):
+                    st.session_state["authentication_status"] = True
+                    st.session_state["name"] = user_name
+                    st.session_state["username"] = username_to_verify
+                    # Reset verification state
+                    st.session_state["requires_verification"] = False
+                    st.session_state["username_for_verification"] = ""
+                    st.rerun()
                 else:
-                    st.error("Username or password is not correct.")
+                    st.error("Verification key is incorrect.")
+        
+        # Show the login form ONLY if verification is not required
+        else:
+            with st.form("Login Form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Login")
+
+                if submitted:
+                    success, user_name, is_verified = check_login(username, password)
+                    
+                    if success:
+                        if is_verified:
+                            # Standard login
+                            st.session_state["authentication_status"] = True
+                            st.session_state["name"] = user_name
+                            st.session_state["username"] = username
+                            st.rerun()
+                        else:
+                            # --- FIX: Set state to trigger verification UI ---
+                            st.session_state["requires_verification"] = True
+                            st.session_state["username_for_verification"] = username
+                            st.rerun() # Rerun to show the verification UI
+                    else:
+                        st.error("Username or password is not correct.")
 
 # If user IS authenticated, run the main chatbot app
 else:
-    # --- LOGGED IN ---
+    # (The main application logic remains the same as before)
     name = st.session_state["name"]
     username = st.session_state["username"]
     user_id = username
@@ -100,18 +124,18 @@ else:
         st.session_state["authentication_status"] = None
         st.session_state["name"] = None
         st.session_state["username"] = None
+        st.session_state["requires_verification"] = False
+        st.session_state["username_for_verification"] = ""
         if user_id in st.session_state.messages:
-             del st.session_state.messages[user_id] # Optional: clear messages on logout
+             del st.session_state.messages[user_id]
         st.rerun()
 
     st.sidebar.title(f"Welcome *{name}*")
     st.sidebar.button('Logout', on_click=logout)
     
-    # Initialize session state for the logged-in user's messages
     if user_id not in st.session_state.messages:
         st.session_state.messages[user_id] = []
     
-    # --- Sidebar for Knowledge Management ---
     with st.sidebar:
         st.divider()
         st.header("Train Your Bot")
@@ -137,7 +161,6 @@ else:
                 st.session_state.messages[user_id] = []
             st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
 
-    # --- Main Chat Interface ---
     st.title("🤖 Personalized AI Chatbot")
     st.caption(f"You are chatting as: {username}")
 
@@ -145,7 +168,9 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant" and "sources" in message and message["sources"]:
+                knowledge_source = message.get("knowledge_source", "Unknown")
                 with st.expander("View Sources"):
+                    st.caption(f"Answer generated using: **{knowledge_source} Knowledge Base**")
                     for source in message["sources"]:
                         source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
                         st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
@@ -163,11 +188,13 @@ else:
                 
                 response_text = response_data.get("answer", "I'm sorry, an error occurred.")
                 sources = response_data.get("sources", [])
+                knowledge_source = response_data.get("knowledge_source", "Unknown")
                 
                 st.write(response_text)
 
                 if sources:
                     with st.expander("View Sources"):
+                        st.caption(f"Answer generated using: **{knowledge_source} Knowledge Base**")
                         for source in sources:
                             source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
                             st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
@@ -176,5 +203,6 @@ else:
         st.session_state.messages[user_id].append({
             "role": "assistant", 
             "content": response_text,
-            "sources": sources
+            "sources": sources,
+            "knowledge_source": knowledge_source
         })

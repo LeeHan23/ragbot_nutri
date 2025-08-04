@@ -20,24 +20,30 @@ except Exception as e:
 # --- Retriever Function ---
 def get_retriever(user_id: str):
     """
-    Initializes and returns a standard vector store retriever.
+    Initializes and returns a vector store retriever and its source name.
     It prioritizes the user-specific database if it exists, otherwise
     it falls back to the foundational base database.
+    
+    Returns:
+        A tuple containing (retriever, knowledge_source_name).
     """
     if not embedding_function:
         raise ValueError("Embedding function is not initialized. Cannot create retriever.")
     
     user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
+    knowledge_source = ""
     
     # Determine which database path and collection name to use
     if os.path.exists(user_specific_db_path):
         print(f"Loading custom knowledge base for user '{user_id}'.")
         persistent_directory = user_specific_db_path
         collection_name = USER_COLLECTION_NAME
+        knowledge_source = "Custom"
     else:
         print(f"No custom knowledge for user '{user_id}'. Falling back to foundational knowledge base.")
         persistent_directory = BASE_DB_PATH
         collection_name = BASE_COLLECTION_NAME
+        knowledge_source = "Foundational"
 
     if not os.path.exists(persistent_directory):
         raise FileNotFoundError(f"Required database not found at {persistent_directory}.")
@@ -51,5 +57,5 @@ def get_retriever(user_id: str):
     # Use a standard, more reliable retriever
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    print(f"Standard retriever initialized for user '{user_id}'.")
-    return retriever
+    print(f"Standard retriever initialized for user '{user_id}' from '{knowledge_source}' source.")
+    return retriever, knowledge_source
