@@ -8,8 +8,6 @@ argparse
 
 # --- Web UI ---
 streamlit
-streamlit-authenticator # <-- ADD THIS LINE
-PyYAML                  # <-- ADD THIS LINE
 
 # --- WhatsApp Integration ---
 twilio
