@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain.retrievers.multi_query import MultiQueryRetriever # Import the multi-query retriever
+from langchain.retrievers.multi_query import MultiQueryRetriever
 
 # Import functions from other modules
 from vector_store import get_retriever
@@ -16,7 +16,7 @@ from llm import get_llm
 from knowledge_manager import get_prompts
 
 # --- ADVANCED RAG PROMPT TEMPLATE ---
-# This new prompt is more detailed and structured to guide the LLM's reasoning process.
+# This version is updated to handle and require direct source citations.
 RAG_PROMPT_TEMPLATE = """
 **Role:** You are "Eva," a world-class AI nutrition and dietetics consultant. Your task is to provide a detailed, evidence-based consultation based on the patient's situation.
 
@@ -27,16 +27,16 @@ RAG_PROMPT_TEMPLATE = """
 
 **Process:**
 1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSATION] to fully understand the patient's condition, goals, and constraints.
-2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Identify all relevant facts, guidelines, contraindications, and recommendations from the provided text.
+2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Each entry is tagged with its source file and page number.
 3.  **Formulate Response:** Structure your answer like a professional consultation note with the following sections:
     * **Assessment:** Briefly summarize your understanding of the patient's situation based on their query.
     * **Key Considerations:** Point out the most important nutritional factors and principles from the knowledge base that apply to this case.
     * **Recommendations:** Provide clear, actionable, and evidence-based recommendations.
-    * **Rationale:** For each recommendation, briefly explain *why* you are suggesting it, citing the principles from the knowledge base.
-4.  **Constraint:** You MUST base your answer *only* on the information provided in the [CONTEXTUAL KNOWLEDGE BASE]. If the context is insufficient to answer, you must state that you do not have enough specific information and advise consulting a human professional. Do not invent information.
+    * **Rationale:** For each recommendation, briefly explain *why* you are suggesting it.
+4.  **Constraint & Citation Mandate:** You MUST base your answer *only* on the information provided in the [CONTEXTUAL KNOWLEDGE BASE]. Crucially, at the end of each key point or recommendation, you **MUST** cite the source using the exact format `[Source: filename.pdf, Page: X]`. If the context is insufficient, state that and advise consulting a human professional.
 
 ---
-[CONTEXTUAL KNOWLEDGE BASE (Your source of truth)]
+[CONTEXTUAL KNOWLEDGE BASE (Your source of truth with citations)]
 {context}
 
 ---
@@ -81,15 +81,22 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         # 1. Get the base retriever
         base_retriever, knowledge_source = get_retriever(user_id)
         
-        # 2. ENHANCEMENT: Use MultiQueryRetriever to generate multiple queries
-        # This casts a wider net to find more comprehensive context.
+        # 2. Use MultiQueryRetriever to generate multiple queries
         multi_query_retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever, llm=llm
         )
         
-        # Retrieve a richer set of documents from multiple perspectives
         retrieved_docs = multi_query_retriever.invoke(user_question)
-        context = "\n\n---\n\n".join([doc.page_content for doc in retrieved_docs])
+        
+        # --- ENHANCEMENT: Format the context to include source and page number ---
+        context_parts = []
+        for doc in retrieved_docs:
+            source = os.path.basename(doc.metadata.get("source", "Unknown"))
+            page = doc.metadata.get("page", "N/A")
+            context_part = f"Source: {source}, Page: {page}\nContent: {doc.page_content}"
+            context_parts.append(context_part)
+        
+        context = "\n\n---\n\n".join(context_parts)
         
         # 3. Load the persona instructions
         instructions, _ = get_prompts()
