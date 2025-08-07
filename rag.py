@@ -4,37 +4,51 @@ from dotenv import load_dotenv
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain.retrievers.multi_query import MultiQueryRetriever # Import the multi-query retriever
 
 # Import functions from other modules
 from vector_store import get_retriever
 from llm import get_llm
-from knowledge_manager import get_prompts # Use the helper from knowledge_manager
+from knowledge_manager import get_prompts
 
-# --- RAG Prompt Template ---
-# This is the core instruction set for the AI model.
+# --- ADVANCED RAG PROMPT TEMPLATE ---
+# This new prompt is more detailed and structured to guide the LLM's reasoning process.
 RAG_PROMPT_TEMPLATE = """
-You are "Eva," an expert wellness assistant. Your goal is to have a personalized, stateful conversation.
-Your personality and response style are strictly defined by the detailed instructions in the [PERSONA INSTRUCTIONS] section.
-You MUST base your answer on the information provided in the [CONTEXTUAL KNOWLEDGE BASE]. If the context is empty, inform the user you don't have specific information on that topic and guide them to a professional.
+**Role:** You are "Eva," a world-class AI nutrition and dietetics consultant. Your task is to provide a detailed, evidence-based consultation based on the patient's situation.
 
-[PERSONA INSTRUCTIONS]
+**Objective:** Analyze the user's question and the provided [CONTEXTUAL KNOWLEDGE BASE] to formulate a comprehensive and professional response. You must synthesize information from all relevant context documents, not just one.
+
+**Persona Instructions:**
 {persona_instructions}
 
+**Process:**
+1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSATION] to fully understand the patient's condition, goals, and constraints.
+2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Identify all relevant facts, guidelines, contraindications, and recommendations from the provided text.
+3.  **Formulate Response:** Structure your answer like a professional consultation note with the following sections:
+    * **Assessment:** Briefly summarize your understanding of the patient's situation based on their query.
+    * **Key Considerations:** Point out the most important nutritional factors and principles from the knowledge base that apply to this case.
+    * **Recommendations:** Provide clear, actionable, and evidence-based recommendations.
+    * **Rationale:** For each recommendation, briefly explain *why* you are suggesting it, citing the principles from the knowledge base.
+4.  **Constraint:** You MUST base your answer *only* on the information provided in the [CONTEXTUAL KNOWLEDGE BASE]. If the context is insufficient to answer, you must state that you do not have enough specific information and advise consulting a human professional. Do not invent information.
+
+---
 [CONTEXTUAL KNOWLEDGE BASE (Your source of truth)]
 {context}
 
+---
 [CURRENT CONVERSATION (Your short-term memory)]
 {chat_history}
 
+---
 [USER'S LATEST MESSAGE]
 Question: {question}
 
-[YOUR RESPONSE]
-Answer:
+---
+[YOUR PROFESSIONAL RESPONSE]
 """
 
 def format_chat_history(chat_history: list) -> str:
@@ -42,7 +56,6 @@ def format_chat_history(chat_history: list) -> str:
     if not chat_history:
         return "No conversation history yet."
     
-    # The history from Streamlit is a list of dicts: {'role': 'user'/'assistant', 'content': '...'}
     langchain_messages = []
     for message in chat_history:
         if message['role'] == 'user':
@@ -50,7 +63,6 @@ def format_chat_history(chat_history: list) -> str:
         elif message['role'] == 'assistant':
             langchain_messages.append(AIMessage(content=message['content']))
     
-    # Format for display in the prompt
     formatted_history = []
     for msg in langchain_messages:
         role = "User" if isinstance(msg, HumanMessage) else "Assistant"
@@ -60,26 +72,32 @@ def format_chat_history(chat_history: list) -> str:
 
 async def get_contextual_response(user_question: str, chat_history: list, user_id: str) -> Dict[str, Any]:
     """
-    This is the main function that generates the bot's response.
-    It uses a direct, manually constructed RAG approach for maximum reliability.
+    Generates a sophisticated, contextual response using an advanced RAG strategy.
     """
     try:
-        print(f"--- Invoking Direct RAG Chain for user: {user_id} ---")
+        print(f"--- Invoking Advanced RAG Chain for user: {user_id} ---")
+        llm = get_llm()
         
-        # 1. Get the appropriate retriever and the name of the knowledge source
-        retriever, knowledge_source = get_retriever(user_id)
+        # 1. Get the base retriever
+        base_retriever, knowledge_source = get_retriever(user_id)
         
-        # 2. Retrieve relevant documents from the knowledge base
-        retrieved_docs = retriever.invoke(user_question)
+        # 2. ENHANCEMENT: Use MultiQueryRetriever to generate multiple queries
+        # This casts a wider net to find more comprehensive context.
+        multi_query_retriever = MultiQueryRetriever.from_llm(
+            retriever=base_retriever, llm=llm
+        )
+        
+        # Retrieve a richer set of documents from multiple perspectives
+        retrieved_docs = multi_query_retriever.invoke(user_question)
         context = "\n\n---\n\n".join([doc.page_content for doc in retrieved_docs])
         
-        # 3. Load the persona and promotion instructions
-        instructions, promos = get_prompts()
+        # 3. Load the persona instructions
+        instructions, _ = get_prompts()
         
         # 4. Format the chat history
         formatted_history = format_chat_history(chat_history)
         
-        # 5. Build the final prompt
+        # 5. Build the final, more detailed prompt
         prompt_template = PromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
         final_prompt = prompt_template.format(
             persona_instructions=instructions,
@@ -88,11 +106,10 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
             question=user_question
         )
         
-        # 6. Call the AI model
-        llm = get_llm()
+        # 6. Call the AI model with the enhanced prompt and context
         response = await llm.ainvoke(final_prompt)
         
-        # 7. Return the response, sources, and knowledge source name
+        # 7. Return the response and sources
         return {
             "answer": response.content,
             "sources": retrieved_docs,

@@ -15,18 +15,21 @@ def get_llm():
     """
     Initializes and returns the ChatOpenAI model instance.
 
-    This function configures the language model to be used for generating responses.
-    We use gpt-3.5-turbo as it is widely available and effective for this task.
+    This function is configured to use a more powerful model (gpt-4-turbo)
+    for enhanced reasoning and interpretation, which is crucial for handling
+    complex patient scenarios.
     
     Returns:
-        An instance of ChatOpenAI.
+        An instance of ChatOpenAI configured with the upgraded model.
     """
     try:
-        # Using gpt-3.5-turbo is more compatible with free-tier and new API keys.
+        # UPGRADE: Using gpt-4-turbo for superior reasoning, synthesis,
+        # and ability to follow complex instructions. This is key for
+        # providing dietitian-level interpretations.
         llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo",
-            temperature=0.7,
-            max_tokens=500,
+            model_name="gpt-4-turbo",
+            temperature=0.5, # Lower temperature for more factual, less creative responses
+            max_tokens=1500, # Increased token limit for more detailed analysis
             openai_api_key=OPENAI_API_KEY
         )
         return llm
