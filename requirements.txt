@@ -1,28 +1,27 @@
-# --- FastAPI and Server ---
+#--- FastAPI and Server ---
 fastapi
 uvicorn[standard]
 gunicorn
 python-dotenv
 python-multipart
 argparse
+requests
 
-# --- Web UI ---
+#--- Web UI ---
 streamlit
 
-# --- WhatsApp Integration ---
-twilio
-
-# --- AI and Language Model ---
+#--- AI and Language Model ---
 langchain
 langchain-openai
 langchain-community
 
-# --- Vector Store ---
+#--- Vector Store ---
 chromadb
 
-# --- Document Processing ---
+#--- Document Processing ---
 python-docx
 pypdf
 docx2txt
 aiofiles
 pymupdf
+
