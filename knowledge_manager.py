@@ -42,27 +42,45 @@ def _get_latest_file_content(directory: str) -> str:
         print(f"Error reading from {directory}: {e}")
         return ""
 
-def get_prompts() -> tuple[str, str]:
+def get_prompts(user_id: str = None) -> tuple[str, str]:
     """
     Loads the content of the latest persona instructions and promotions files.
-    This is called by the RAG chain every time a user sends a message.
+    It prioritizes user-specific instructions if available, otherwise falls back
+    to the global instructions.
+
+    Args:
+        user_id (str, optional): The user's ID to look for specific instructions.
+
+    Returns:
+        A tuple containing the full instruction string and an empty string for compatibility.
     """
     print("Loading persona instructions and latest promotions...")
     
-    instructions = _get_latest_file_content(INSTRUCTIONS_PATH)
+    instructions = ""
+    # 1. Try to load user-specific instructions first
+    if user_id:
+        user_instructions_dir = os.path.join(INSTRUCTIONS_PATH, str(user_id))
+        if os.path.exists(user_instructions_dir):
+            print(f"Found user-specific instructions for user '{user_id}'.")
+            instructions = _get_latest_file_content(user_instructions_dir)
+
+    # 2. If no user-specific instructions are found, load the global ones
+    if not instructions:
+        print("No user-specific instructions found, falling back to global instructions.")
+        instructions = _get_latest_file_content(INSTRUCTIONS_PATH)
+
+    # 3. Load global promotions (promotions are always global)
     promotions = _get_latest_file_content(PROMOS_PATH)
     
-    # Provide default text if the instruction or promotion files are missing or empty
+    # 4. Provide default text if instructions or promotions are still empty
     if not instructions:
         instructions = "You are a helpful general assistant. Since no specific instructions were provided, answer questions concisely."
     if not promotions:
         promotions = "There are no special promotions at this time."
         
-    # Combine the instructions and promotions into a single block for the AI
+    # 5. Combine the instructions and promotions into a single block
     full_instructions = f"{instructions}\n\n[LATEST PROMOTIONS & OFFERS]\n{promotions}"
     
-    # Return the combined instructions. The second empty string is for compatibility
-    # with the function signature expected in rag.py.
     return full_instructions, ""
 
 

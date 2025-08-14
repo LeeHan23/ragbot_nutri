@@ -98,8 +98,8 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # 3. Load the persona instructions
-        instructions, _ = get_prompts()
+        # 3. Load the persona instructions, now user-aware
+        instructions, _ = get_prompts(user_id=user_id)
         
         # 4. Format the chat history
         formatted_history = format_chat_history(chat_history)
