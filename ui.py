@@ -1,20 +1,15 @@
 import streamlit as st
 import asyncio
 import os
-import shutil
 from dotenv import load_dotenv
 
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
 from rag import get_contextual_response
-from knowledge_manager import build_user_database
+from instructions_manager import save_instruction_file
 from database import add_user, check_login, verify_user
 from langchain_core.messages import HumanMessage, AIMessage
-
-# --- Constants ---
-PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
-USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
@@ -138,28 +133,22 @@ else:
     
     with st.sidebar:
         st.divider()
-        st.header("Train Your Bot")
-        uploaded_files = st.file_uploader(
-            "Upload your .docx persona files",
-            accept_multiple_files=True,
-            type=['docx']
+        st.header("Customize Your Bot's Persona")
+        st.info("Upload a .docx file with instructions on how your bot should behave.")
+
+        uploaded_file = st.file_uploader(
+            "Upload a .docx instruction file",
+            type=['docx'],
+            accept_multiple_files=False # Only one instruction file at a time
         )
 
-        if st.button("Build Custom Knowledge Base"):
-            if not uploaded_files:
-                st.warning("Please upload at least one .docx document.")
+        if st.button("Update Persona"):
+            if uploaded_file:
+                with st.spinner("Updating persona..."):
+                    save_instruction_file(user_id, uploaded_file)
+                st.success("✅ Persona updated successfully!")
             else:
-                with st.spinner("Building your custom knowledge base... This may take a moment."):
-                    build_user_database(user_id, uploaded_files, status_callback=st.write)
-                st.success("Training complete! Your custom knowledge base is ready.")
-        
-        if st.button("Reset to Foundational Knowledge"):
-            with st.spinner("Resetting knowledge base..."):
-                user_db_path = os.path.join(USER_DB_PATH, user_id)
-                if os.path.exists(user_db_path):
-                    shutil.rmtree(user_db_path)
-                st.session_state.messages[user_id] = []
-            st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
+                st.warning("Please upload a file first.")
 
     st.title("🤖 Personalized AI Chatbot")
     st.caption(f"You are chatting as: {username}")
