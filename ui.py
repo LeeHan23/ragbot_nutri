@@ -138,28 +138,8 @@ else:
     
     with st.sidebar:
         st.divider()
-        st.header("Train Your Bot")
-        uploaded_files = st.file_uploader(
-            "Upload your .docx persona files",
-            accept_multiple_files=True,
-            type=['docx']
-        )
-
-        if st.button("Build Custom Knowledge Base"):
-            if not uploaded_files:
-                st.warning("Please upload at least one .docx document.")
-            else:
-                with st.spinner("Building your custom knowledge base... This may take a moment."):
-                    build_user_database(user_id, uploaded_files, status_callback=st.write)
-                st.success("Training complete! Your custom knowledge base is ready.")
-        
-        if st.button("Reset to Foundational Knowledge"):
-            with st.spinner("Resetting knowledge base..."):
-                user_db_path = os.path.join(USER_DB_PATH, user_id)
-                if os.path.exists(user_db_path):
-                    shutil.rmtree(user_db_path)
-                st.session_state.messages[user_id] = []
-            st.success(f"Custom knowledge for user '{user_id}' has been cleared.")
+        st.header("About")
+        st.info("This chatbot is a nutrition and sales specialist. It uses a foundational knowledge base to answer your questions.")
 
     st.title("🤖 Personalized AI Chatbot")
     st.caption(f"You are chatting as: {username}")

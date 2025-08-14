@@ -5,9 +5,7 @@ from langchain_openai import OpenAIEmbeddings
 # --- Constants ---
 # Correctly point to the persistent disk path provided by the environment
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
-USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db") 
-BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base")
-USER_COLLECTION_NAME = "user_knowledge"
+BASE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectorstore_base")
 BASE_COLLECTION_NAME = "base_knowledge"
 
 # --- Embedding Function ---
@@ -20,9 +18,8 @@ except Exception as e:
 # --- Retriever Function ---
 def get_retriever(user_id: str):
     """
-    Initializes and returns a vector store retriever and its source name.
-    It prioritizes the user-specific database if it exists, otherwise
-    it falls back to the foundational base database.
+    Initializes and returns a vector store retriever for the foundational
+    knowledge base. All users share this single data source.
     
     Returns:
         A tuple containing (retriever, knowledge_source_name).
@@ -30,32 +27,19 @@ def get_retriever(user_id: str):
     if not embedding_function:
         raise ValueError("Embedding function is not initialized. Cannot create retriever.")
     
-    user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
-    knowledge_source = ""
+    print(f"Loading foundational knowledge base for user '{user_id}'.")
     
-    # Determine which database path and collection name to use
-    if os.path.exists(user_specific_db_path):
-        print(f"Loading custom knowledge base for user '{user_id}'.")
-        persistent_directory = user_specific_db_path
-        collection_name = USER_COLLECTION_NAME
-        knowledge_source = "Custom"
-    else:
-        print(f"No custom knowledge for user '{user_id}'. Falling back to foundational knowledge base.")
-        persistent_directory = BASE_DB_PATH
-        collection_name = BASE_COLLECTION_NAME
-        knowledge_source = "Foundational"
+    if not os.path.exists(BASE_DB_PATH):
+        raise FileNotFoundError(f"The foundational database was not found at {BASE_DB_PATH}. Please run `build_base_db.py` first.")
 
-    if not os.path.exists(persistent_directory):
-        raise FileNotFoundError(f"Required database not found at {persistent_directory}.")
-
+    # Always load the base vector store
     vector_store = Chroma(
-        persist_directory=persistent_directory,
+        persist_directory=BASE_DB_PATH,
         embedding_function=embedding_function,
-        collection_name=collection_name
+        collection_name=BASE_COLLECTION_NAME
     )
     
-    # Use a standard, more reliable retriever
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    print(f"Standard retriever initialized for user '{user_id}' from '{knowledge_source}' source.")
-    return retriever, knowledge_source
+    print(f"Retriever initialized for user '{user_id}' from 'Foundational' source.")
+    return retriever, "Foundational"
