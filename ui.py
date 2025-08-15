@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import asyncio
 import os
 from dotenv import load_dotenv
@@ -110,6 +111,12 @@ if not st.session_state["authentication_status"]:
 
 # If user IS authenticated, run the main chatbot app
 else:
+    # Add the GoatCounter script for analytics
+    components.html("""
+        <script data-goatcounter="https://han233.goatcounter.com/count"
+                async src="//gc.zgo.at/count.js"></script>
+    """, height=0)
+
     # (The main application logic remains the same as before)
     name = st.session_state["name"]
     username = st.session_state["username"]

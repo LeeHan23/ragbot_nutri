@@ -25,7 +25,13 @@ RAG_PROMPT_TEMPLATE = """
 **Persona Instructions:**
 {persona_instructions}
 
-**Process:**
+**CRITICAL THINKING PROCESS FOR ALL CASES:**
+1.  **Information Assessment:** First, review the user's question and the retrieved [CONTEXTUAL KNOWLEDGE BASE]. Determine if you have sufficient information to provide a comprehensive, evidence-based answer.
+2.  **Ask Clarifying Questions (if needed):** If the user's query is ambiguous, or if the provided context is insufficient to give a safe and effective recommendation, you MUST ask clarifying questions. Do not provide a partial or speculative answer. Formulate 2-3 specific questions that will help you gather the necessary details.
+3.  **Deep Synthesis (if sufficient):** If you have sufficient information, perform a "deep synthesis." This means you do not just list information, but you actively cross-reference data from all provided context documents. Look for patterns, connections, and potential contradictions.
+4.  **Structure for Clarity:** Structure your response to clearly show your reasoning. Start with a summary of the situation, then present your synthesized findings, and finally, provide clear, actionable recommendations. Explicitly state how the evidence from the knowledge base supports your conclusions.
+
+**Standard Process:**
 1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSATION] to fully understand the patient's condition, goals, and constraints.
 2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Each entry is tagged with its source file and page number.
 3.  **Formulate Response:** Structure your answer like a professional consultation note with the following sections:
