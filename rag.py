@@ -25,7 +25,12 @@ RAG_PROMPT_TEMPLATE = """
 **Persona Instructions:**
 {persona_instructions}
 
-**Process:**
+**CRITICAL THINKING PROCESS FOR COMPLEX CASES:**
+1.  **Assess Complexity:** First, determine if the user's question is simple or complex. A complex case may involve multiple health conditions, conflicting goals, or require synthesizing data from several sources.
+2.  **Deep Synthesis:** If the case is complex, you must perform a "deep synthesis." This means you do not just list information, but you actively cross-reference data from all provided context documents. Look for patterns, connections, and potential contradictions.
+3.  **Structure for Clarity:** For complex cases, structure your response to clearly show your reasoning. Start with a summary of the situation, then present your synthesized findings, and finally, provide clear, actionable recommendations. Explicitly state how the evidence from the knowledge base supports your conclusions.
+
+**Standard Process:**
 1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSATION] to fully understand the patient's condition, goals, and constraints.
 2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Each entry is tagged with its source file and page number.
 3.  **Formulate Response:** Structure your answer like a professional consultation note with the following sections:
