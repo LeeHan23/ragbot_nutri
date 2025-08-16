@@ -25,7 +25,7 @@ def add_pdf_to_base_db(pdf_path: str):
 
     Args:
         pdf_path (str): The full path to the PDF file to be added.
-
+    
     Returns:
         bool: True if the operation was successful, False otherwise.
     """
@@ -75,7 +75,7 @@ def add_pdf_to_base_db(pdf_path: str):
         # 5. Add the new document chunks to the vector store
         print(f"Adding {len(chunks)} new chunks to the vector store...")
         vector_store.add_documents(chunks)
-
+        
         # Note: ChromaDB with a persistent client auto-saves changes.
         # There is no explicit .save() method needed.
 

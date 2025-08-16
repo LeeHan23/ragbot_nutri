@@ -31,19 +31,19 @@ async def add_to_knowledge_base(file: UploadFile = File(...)):
     try:
         # Ensure the target directory exists
         os.makedirs(BASE_DOCS_DIR, exist_ok=True)
-
+        
         # Define the path to save the uploaded PDF
         file_path = os.path.join(BASE_DOCS_DIR, file.filename)
-
+        
         # Save the uploaded file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
+        
         print(f"Saved new knowledge PDF to: {file_path}")
-
+        
         # Trigger the incremental update of the vector store
         success = add_pdf_to_base_db(file_path)
-
+        
         if success:
             return JSONResponse(
                 status_code=200,
@@ -52,7 +52,7 @@ async def add_to_knowledge_base(file: UploadFile = File(...)):
         else:
             # If add_pdf_to_base_db returns False, it means an internal error occurred
             raise HTTPException(status_code=500, detail="Failed to process the document and add it to the vector store.")
-
+            
     except Exception as e:
         # Catch any other exceptions during file handling or processing
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")

@@ -17,7 +17,7 @@ def save_instruction_file(user_id: str, uploaded_file: UploadFile):
     Args:
         user_id (str): The unique identifier for the user.
         uploaded_file (UploadFile): The .docx file uploaded by the user.
-
+    
     Returns:
         str: The path to the saved text file, or None if an error occurred.
     """
@@ -27,10 +27,10 @@ def save_instruction_file(user_id: str, uploaded_file: UploadFile):
 
     # Create a directory path that is unique to the user
     user_instructions_dir = os.path.join(BASE_INSTRUCTIONS_DIR, str(user_id))
-
+    
     # Ensure the user-specific directory exists
     os.makedirs(user_instructions_dir, exist_ok=True)
-
+    
     try:
         # Use the existing uploader function to process the file
         # and save it to the user's specific instruction directory.
@@ -38,10 +38,10 @@ def save_instruction_file(user_id: str, uploaded_file: UploadFile):
         # For instructions, we might want a consistent filename, but for now,
         # we'll leverage the existing safe-handling function.
         saved_path = save_uploaded_file_as_text(uploaded_file, user_instructions_dir)
-
+        
         print(f"Successfully saved new instructions for user '{user_id}' at: {saved_path}")
         return saved_path
-
+        
     except Exception as e:
         print(f"Error saving instruction file for user '{user_id}': {e}")
         return None
