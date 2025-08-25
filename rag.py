@@ -9,6 +9,9 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain.retrievers.multi_query import MultiQueryRetriever
+# --- IMPORTS FOR CONTEXTUAL COMPRESSION ---
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
 
 # Import functions from other modules
 from vector_store import get_retriever
@@ -16,7 +19,7 @@ from llm import get_llm
 from knowledge_manager import get_prompts
 
 # --- ADVANCED RAG PROMPT TEMPLATE ---
-# This version is updated to handle and require direct source citations.
+# This is your excellent, detailed prompt. No changes are needed here.
 RAG_PROMPT_TEMPLATE = """
 **Role:** You are "Eva," a world-class AI nutrition and dietetics consultant. Your task is to provide a detailed, evidence-based consultation based on the patient's situation.
 
@@ -32,7 +35,7 @@ RAG_PROMPT_TEMPLATE = """
 4.  **Structure for Clarity:** Structure your response to clearly show your reasoning. Start with a summary of the situation, then present your synthesized findings, and finally, provide clear, actionable recommendations. Explicitly state how the evidence from the knowledge base supports your conclusions.
 
 **Standard Process:**
-1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSATION] to fully understand the patient's condition, goals, and constraints.
+1.  **Assess the Situation:** Carefully read the [USER'S LATEST MESSAGE] and the [CURRENT CONVERSION] to fully understand the patient's condition, goals, and constraints.
 2.  **Synthesize Knowledge:** Review the entire [CONTEXTUAL KNOWLEDGE BASE]. Each entry is tagged with its source file and page number.
 3.  **Formulate Response:** Structure your answer like a professional consultation note with the following sections:
     * **Assessment:** Briefly summarize your understanding of the patient's situation based on their query.
@@ -46,7 +49,7 @@ RAG_PROMPT_TEMPLATE = """
 {context}
 
 ---
-[CURRENT CONVERSATION (Your short-term memory)]
+[CURRENT CONVERSION (Your short-term memory)]
 {chat_history}
 
 ---
@@ -87,14 +90,24 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         # 1. Get the base retriever
         base_retriever, knowledge_source = get_retriever(user_id)
         
-        # 2. Use MultiQueryRetriever to generate multiple queries
+        # 2. Set up the Multi-Query Retriever to get a broad context
         multi_query_retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever, llm=llm
         )
         
-        retrieved_docs = multi_query_retriever.invoke(user_question)
+        # --- 3. NEW: Set up the Contextual Compression Retriever ---
+        # This will take the broad results from the multi-query retriever
+        # and use an LLM to extract only the most relevant information.
+        compressor = LLMChainExtractor.from_llm(llm)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=multi_query_retriever
+        )
         
-        # --- ENHANCEMENT: Format the context to include source and page number ---
+        # 4. Invoke the compression retriever to get the final, focused documents
+        retrieved_docs = compression_retriever.invoke(user_question)
+        
+        # 5. Format the context for citation
         context_parts = []
         for doc in retrieved_docs:
             source = os.path.basename(doc.metadata.get("source", "Unknown"))
@@ -104,13 +117,14 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # 3. Load the persona instructions, now user-aware
-        instructions, _ = get_prompts(user_id=user_id)
+        # 6. Load the global persona instructions
+        # FIX: Removed user_id from this call as get_prompts loads global instructions.
+        instructions, _ = get_prompts()
         
-        # 4. Format the chat history
+        # 7. Format the chat history
         formatted_history = format_chat_history(chat_history)
         
-        # 5. Build the final, more detailed prompt
+        # 8. Build the final, more detailed prompt
         prompt_template = PromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
         final_prompt = prompt_template.format(
             persona_instructions=instructions,
@@ -119,10 +133,10 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
             question=user_question
         )
         
-        # 6. Call the AI model with the enhanced prompt and context
+        # 9. Call the AI model with the enhanced prompt and context
         response = await llm.ainvoke(final_prompt)
         
-        # 7. Return the response and sources
+        # 10. Return the response and sources
         return {
             "answer": response.content,
             "sources": retrieved_docs,
