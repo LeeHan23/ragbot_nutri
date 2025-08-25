@@ -19,7 +19,6 @@ from llm import get_llm
 from knowledge_manager import get_prompts
 
 # --- ADVANCED RAG PROMPT TEMPLATE ---
-# This is your excellent, detailed prompt. No changes are needed here.
 RAG_PROMPT_TEMPLATE = """
 **Role:** You are "Eva," a world-class AI nutrition and dietetics consultant. Your task is to provide a detailed, evidence-based consultation based on the patient's situation.
 
@@ -95,9 +94,7 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
             retriever=base_retriever, llm=llm
         )
         
-        # --- 3. NEW: Set up the Contextual Compression Retriever ---
-        # This will take the broad results from the multi-query retriever
-        # and use an LLM to extract only the most relevant information.
+        # 3. Set up the Contextual Compression Retriever
         compressor = LLMChainExtractor.from_llm(llm)
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor,
@@ -117,9 +114,8 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # 6. Load the global persona instructions
-        # FIX: Removed user_id from this call as get_prompts loads global instructions.
-        instructions, _ = get_prompts()
+        # 6. Load persona instructions, now aware of the specific user
+        instructions, _ = get_prompts(user_id=user_id)
         
         # 7. Format the chat history
         formatted_history = format_chat_history(chat_history)
@@ -133,7 +129,7 @@ async def get_contextual_response(user_question: str, chat_history: list, user_i
             question=user_question
         )
         
-        # 9. Call the AI model with the enhanced prompt and context
+        # 9. Call the AI model
         response = await llm.ainvoke(final_prompt)
         
         # 10. Return the response and sources
