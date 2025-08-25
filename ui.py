@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from rag import get_contextual_response
-from knowledge_manager import build_user_database # Import from new consolidated manager
+from knowledge_manager import build_user_database
 from database import add_user, check_login, verify_user
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -20,7 +20,6 @@ USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
 st.set_page_config(page_title="Personalized AI Chatbot", page_icon="🤖", layout="wide")
 
 # --- Initialize Session State ---
-# (Session state initialization remains the same)
 if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
 if "name" not in st.session_state:
@@ -34,28 +33,78 @@ if "requires_verification" not in st.session_state:
 if "username_for_verification" not in st.session_state:
     st.session_state["username_for_verification"] = ""
 
+
 # --- Authentication and Main App Logic ---
+
 if not st.session_state["authentication_status"]:
-    # (Login/Signup logic remains the same)
     st.title("Welcome to the Personalized AI Nutrition Chatbot")
+    
     choice = st.sidebar.selectbox("Login or Sign Up", ["Login", "Sign Up"])
+    
     if choice == "Sign Up":
         st.subheader("Create a New Account")
         st.session_state["requires_verification"] = False 
         with st.form("Sign Up Form"):
-            # ... (signup form code)
-            pass # Placeholder for brevity
+            new_name = st.text_input("Full Name")
+            new_username = st.text_input("Username")
+            new_password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Sign Up")
+
+            if submitted:
+                if not all([new_name, new_username, new_password]):
+                    st.error("Please fill out all fields.")
+                else:
+                    verification_key = add_user(new_username, new_name, new_password)
+                    if verification_key:
+                        st.success("Account created successfully!")
+                        st.info(f"Please copy your one-time verification key and use it on your first login: **{verification_key}**")
+                    else:
+                        st.error("Username already exists. Please choose a different one.")
+
     else: # Login
         st.subheader("Login to Your Account")
+        
         if st.session_state.get("requires_verification"):
-            # ... (verification code)
-            pass # Placeholder for brevity
+            st.info("This is your first login. Please enter your verification key to continue.")
+            
+            verification_key = st.text_input("One-Time Verification Key")
+            
+            if st.button("Verify and Login"):
+                username_to_verify = st.session_state["username_for_verification"]
+                success, user_name, is_verified = check_login(username_to_verify, "")
+                
+                if verify_user(username_to_verify, verification_key):
+                    st.session_state["authentication_status"] = True
+                    st.session_state["name"] = user_name
+                    st.session_state["username"] = username_to_verify
+                    st.session_state["requires_verification"] = False
+                    st.session_state["username_for_verification"] = ""
+                    st.rerun()
+                else:
+                    st.error("Verification key is incorrect.")
+        
         else:
             with st.form("Login Form"):
-                # ... (login form code)
-                pass # Placeholder for brevity
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Login")
 
-# If user IS authenticated, run the main chatbot app
+                if submitted:
+                    success, user_name, is_verified = check_login(username, password)
+                    
+                    if success:
+                        if is_verified:
+                            st.session_state["authentication_status"] = True
+                            st.session_state["name"] = user_name
+                            st.session_state["username"] = username
+                            st.rerun()
+                        else:
+                            st.session_state["requires_verification"] = True
+                            st.session_state["username_for_verification"] = username
+                            st.rerun()
+                    else:
+                        st.error("Username or password is not correct.")
+
 else:
     name = st.session_state["name"]
     username = st.session_state["username"]
@@ -74,7 +123,6 @@ else:
     st.sidebar.title(f"Welcome *{name}*")
     st.sidebar.button('Logout', on_click=logout)
     
-    # --- NEW: Add Clear Chat History Button ---
     if st.sidebar.button("Clear Chat History"):
         if user_id in st.session_state.messages:
             st.session_state.messages[user_id] = []
@@ -108,8 +156,48 @@ else:
                 st.session_state.messages[user_id] = []
             st.success("Knowledge base reset.")
 
-    # --- Main Chat Interface ---
-    # (The chat interface logic remains the same)
     st.title("🤖 Personalized AI Chatbot")
     st.caption(f"You are chatting as: {username}")
-    # ... (rest of the chat UI code)
+
+    for message in st.session_state.messages.get(user_id, []):
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            if message["role"] == "assistant" and "sources" in message and message["sources"]:
+                knowledge_source = message.get("knowledge_source", "Unknown")
+                with st.expander("View Sources"):
+                    st.caption(f"Answer generated using: **{knowledge_source} Knowledge Base**")
+                    for source in message["sources"]:
+                        source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                        st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
+                        st.caption(f"> {source.page_content[:250]}...")
+
+    if prompt := st.chat_input("Ask me anything..."):
+        st.session_state.messages[user_id].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Eva is thinking..."):
+                chat_history = st.session_state.messages[user_id]
+                response_data = asyncio.run(get_contextual_response(prompt, chat_history, user_id))
+                
+                response_text = response_data.get("answer", "I'm sorry, an error occurred.")
+                sources = response_data.get("sources", [])
+                knowledge_source = response_data.get("knowledge_source", "Unknown")
+                
+                st.write(response_text)
+
+                if sources:
+                    with st.expander("View Sources"):
+                        st.caption(f"Answer generated using: **{knowledge_source} Knowledge Base**")
+                        for source in sources:
+                            source_name = os.path.basename(source.metadata.get('source', 'Unknown'))
+                            st.info(f"Source: {source_name}, Page: {source.metadata.get('page', 'N/A')}")
+                            st.caption(f"> {source.page_content[:250]}...")
+
+        st.session_state.messages[user_id].append({
+            "role": "assistant", 
+            "content": response_text,
+            "sources": sources,
+            "knowledge_source": knowledge_source
+        })
