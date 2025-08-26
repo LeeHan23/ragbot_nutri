@@ -9,20 +9,28 @@ load_dotenv()
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader
+from langchain_community.document_loaders import Docx2txtLoader, PyMuPDFLoader
+from fastapi import UploadFile
+from uploader import save_uploaded_file_as_text
 
 # --- Constants ---
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
-USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
-COLLECTION_NAME = "user_knowledge"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_UPLOADS_DIR = os.path.join(BASE_DIR, "temp_uploads")
-PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
+
+# Paths for Foundational Knowledge Base
+BASE_DOCS_DIR = os.path.join(BASE_DIR, "data", "base_documents")
+BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base")
+BASE_COLLECTION_NAME = "base_knowledge"
+
+# Paths for User-Specific Knowledge & Instructions
+USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db")
+USER_COLLECTION_NAME = "user_knowledge"
 INSTRUCTIONS_PATH = os.path.join(BASE_DIR, "data", "instructions")
+PROMOS_PATH = os.path.join(BASE_DIR, "data", "promos")
+TEMP_UPLOADS_DIR = os.path.join(BASE_DIR, "temp_uploads")
 
 
 # --- Prompt Loading Functions ---
-# (This section remains the same)
 def _get_latest_file_content(directory: str) -> str:
     try:
         if not os.path.exists(directory):
@@ -55,7 +63,41 @@ def get_prompts(user_id: str = None) -> tuple[str, str]:
     return full_instructions, ""
 
 
-# --- Knowledge Base Building Functions ---
+# --- Foundational Knowledge Base Management ---
+
+def add_pdf_to_base_db(pdf_path: str):
+    """
+    Incrementally adds a single PDF to the existing foundational knowledge base.
+    """
+    if not os.path.exists(BASE_DB_PATH):
+        print(f"Error: The base vector store at '{BASE_DB_PATH}' does not exist.")
+        return False
+    
+    print(f"--- Starting incremental update for: {os.path.basename(pdf_path)} ---")
+    try:
+        loader = PyMuPDFLoader(pdf_path)
+        documents = loader.load()
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = text_splitter.split_documents(documents)
+        
+        if not chunks:
+            print("No text chunks to add.")
+            return False
+
+        embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002")
+        vector_store = Chroma(
+            persist_directory=BASE_DB_PATH,
+            embedding_function=embedding_function,
+            collection_name=BASE_COLLECTION_NAME
+        )
+        vector_store.add_documents(chunks)
+        print("✅ Incremental update complete.")
+        return True
+    except Exception as e:
+        print(f"An error occurred during the incremental update: {e}")
+        return False
+
+# --- User-Specific Knowledge and Instructions Management ---
 
 def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
     """
@@ -69,18 +111,10 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     
     if status_callback: status_callback(f"--- Starting new custom build for user: {user_id} ---")
 
-    # --- FIX: Remove the chromadb.Client().reset() call ---
-    # The reset() function is disabled by default in newer versions and is not the
-    # correct way to handle this. The file lock issue is transient and simply
-    # deleting the old directory is the intended workflow.
-
-    # 1. Clear any existing custom database for this user to ensure a fresh start.
     if os.path.exists(user_db_path):
         if status_callback: status_callback("Clearing old custom knowledge base...")
         shutil.rmtree(user_db_path)
 
-    # 2. Load the user's newly uploaded documents
-    if status_callback: status_callback("Loading user documents...")
     all_docs = []
     os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True)
     for file_obj in uploaded_docx_files:
@@ -102,12 +136,10 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
         if status_callback: status_callback("No documents found to process.")
         return
 
-    # 3. Split all documents together
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(all_docs)
     if status_callback: status_callback(f"Split documents into {len(chunks)} chunks.")
 
-    # 4. Create the new user-specific database
     if chunks:
         if status_callback: status_callback("Embedding documents...")
         embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002", max_retries=6, chunk_size=500)
@@ -116,12 +148,26 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
             documents=chunks,
             embedding=embedding_function,
             persist_directory=user_db_path,
-            collection_name=COLLECTION_NAME
+            collection_name=USER_COLLECTION_NAME
         )
         
         if status_callback: status_callback("✅ Training complete! Your custom knowledge base is ready.")
     else:
         if status_callback: status_callback("No content found in documents to train on.")
 
+def save_instruction_file(user_id: str, uploaded_file: UploadFile):
+    """
+    Saves a user-uploaded .docx file as their specific instruction text.
+    """
+    user_instructions_dir = os.path.join(INSTRUCTIONS_PATH, str(user_id))
+    os.makedirs(user_instructions_dir, exist_ok=True)
+    try:
+        saved_path = save_uploaded_file_as_text(uploaded_file, user_instructions_dir)
+        print(f"Saved new instructions for user '{user_id}' at: {saved_path}")
+        return saved_path
+    except Exception as e:
+        print(f"Error saving instruction file for user '{user_id}': {e}")
+        return None
+
 if __name__ == "__main__":
-    print("This script is primarily intended to be called from the UI.")
+    print("This script is primarily intended to be called from the UI or other modules.")
