@@ -5,40 +5,42 @@ from dotenv import load_dotenv
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma # <-- UPDATED IMPORT
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader
 
+# --- UNIFIED PATH CONFIGURATION ---
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_DATA_PATH = os.path.join(APP_DIR, "data")
+PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", LOCAL_DATA_PATH)
+
 # ========= CONFIGURATION =========
-# Define the directory where your core PDFs are stored
-BASE_DOCS_DIR = os.path.join("data", "base_documents")
-# Define the directory where the foundational database will be saved
-BASE_INDEX_DIR = "vectorstore_base"
+BASE_DOCS_DIR = os.path.join(APP_DIR, "data", "base_documents")
+BASE_INDEX_DIR = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base") # Use the consistent path
 COLLECTION_NAME = "base_knowledge"
 # =================================
 
 def build_base_database():
     """
-    This script builds the foundational vector store by automatically finding
-    and processing ALL .pdf files in the 'data/base_documents' directory.
+    Builds the foundational vector store by processing all .pdf files
+    in the 'data/base_documents' directory.
     """
     print("--- Building Foundational Knowledge Base ---")
     
     embedding_function = OpenAIEmbeddings(
         model="text-embedding-ada-002",
-        max_retries=10,
-        retry_min_seconds=20,
-        retry_max_seconds=60,
-        chunk_size=500
+        max_retries=10
     )
 
     if os.path.exists(BASE_INDEX_DIR):
         print(f"Clearing existing base vector store at: {BASE_INDEX_DIR}")
         shutil.rmtree(BASE_INDEX_DIR)
-    print("Base vector store cleared.")
+    
+    # Ensure the parent directory exists
+    os.makedirs(PERSISTENT_DISK_PATH, exist_ok=True)
+    print("Base vector store directory prepared.")
 
-    # --- MODIFIED: Automatically find all PDF files in the directory ---
     all_docs = []
     print(f"Scanning for PDF documents in '{BASE_DOCS_DIR}'...")
     
@@ -60,15 +62,13 @@ def build_base_database():
         print("No PDF documents were found or loaded. Aborting database creation.")
         return
 
-    # 3. Split documents into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(all_docs)
     print(f"Split base documents into {len(chunks)} chunks.")
 
-    # 4. Create the database in a single, robust operation
     if chunks:
-        print("\nCreating and persisting the base vector store...")
-        print("This is a one-time setup and may take several minutes...")
+        print(f"\nCreating and persisting the base vector store at {BASE_INDEX_DIR}...")
+        print("This may take several minutes...")
         
         Chroma.from_documents(
             documents=chunks,
@@ -83,3 +83,4 @@ def build_base_database():
 
 if __name__ == "__main__":
     build_base_database()
+
