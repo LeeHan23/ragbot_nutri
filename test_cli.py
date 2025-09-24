@@ -14,7 +14,7 @@ from rag import get_contextual_response
 # --- Define a user_id for this test session ---
 # This allows you to test both the foundational knowledge (by using a new user_id)
 # and a custom knowledge base if you've already created one for a specific user.
-TEST_USER_ID = "cli_test_user"
+TEST_USER_ID = "test_user_01"
 
 # --- Mock User Session Store ---
 # This dictionary simulates the user_sessions store

@@ -10,7 +10,7 @@ PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", LOCAL_DATA_PATH)
 
 # --- Constants ---
 USER_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "chroma_db") 
-BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base") # Use the consistent path
+BASE_DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "vectorstore_base")
 USER_COLLECTION_NAME = "user_knowledge"
 BASE_COLLECTION_NAME = "base_knowledge"
 
@@ -21,45 +21,49 @@ except Exception as e:
     print(f"Error initializing LangChain OpenAI Embeddings: {e}")
     embedding_function = None
 
-# --- Retriever Function ---
-@lru_cache(maxsize=32) # <-- 2. ADD THE CACHE DECORATOR
-def get_retriever(user_id: str):
-    """
-    Initializes and returns a vector store retriever.
-    It prioritizes the user-specific database if it exists, otherwise
-    it falls back to the foundational base database.
+# --- Retriever Functions ---
 
-    This function is cached to prevent reloading the database from disk on every call.
+@lru_cache(maxsize=1) # <-- 2. CACHE THE FOUNDATIONAL DATABASE
+def get_base_retriever():
+    """
+    Loads and returns a retriever for the foundational knowledge base.
+    This function is cached to prevent reloading the large database from disk on every call.
     """
     if not embedding_function:
-        raise ValueError("Embedding function is not initialized. Cannot create retriever.")
+        raise ValueError("Embedding function not initialized.")
     
-    user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
-    knowledge_source = ""
-    
-    if os.path.exists(user_specific_db_path):
-        print(f"Loading custom knowledge base for user '{user_id}'. (Cache MISS)")
-        persistent_directory = user_specific_db_path
-        collection_name = USER_COLLECTION_NAME
-        knowledge_source = "Custom"
-    else:
-        print(f"No custom knowledge for user '{user_id}'. Falling back to foundational knowledge base. (Cache MISS)")
-        persistent_directory = BASE_DB_PATH
-        collection_name = BASE_COLLECTION_NAME
-        knowledge_source = "Foundational"
+    if not os.path.exists(BASE_DB_PATH):
+        raise FileNotFoundError(f"Foundational database not found at {BASE_DB_PATH}. Please run build_base_db.py.")
 
-    if not os.path.exists(persistent_directory):
-        # This will now raise the FileNotFoundError with the correct path
-        raise FileNotFoundError(f"Required database not found at {persistent_directory}. Please run build_base_db.py first.")
-
+    print("Loading foundational knowledge base into memory cache...")
     vector_store = Chroma(
-        persist_directory=persistent_directory,
+        persist_directory=BASE_DB_PATH,
         embedding_function=embedding_function,
-        collection_name=collection_name
+        collection_name=BASE_COLLECTION_NAME
     )
+    return vector_store.as_retriever(search_kwargs={"k": 5})
+
+@lru_cache(maxsize=32) # <-- 3. CACHE USER-SPECIFIC DATABASES
+def get_user_retriever(user_id: str):
+    """
+    Loads and returns a retriever for a user's specific knowledge base.
+    Returns None if the user does not have a custom database.
+    This function is cached to prevent reloading from disk for active users.
+    """
+    if not user_id: return None
+    if not embedding_function:
+        raise ValueError("Embedding function not initialized.")
+
+    user_specific_db_path = os.path.join(USER_DB_PATH, user_id)
     
-    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-    
-    print(f"Retriever initialized and cached for user '{user_id}' from '{knowledge_source}' source.")
-    return retriever, knowledge_source
+    if not os.path.exists(user_specific_db_path):
+        return None # No custom database for this user
+
+    print(f"Loading custom knowledge base for user '{user_id}' into memory cache...")
+    vector_store = Chroma(
+        persist_directory=user_specific_db_path,
+        embedding_function=embedding_function,
+        collection_name=USER_COLLECTION_NAME
+    )
+    return vector_store.as_retriever(search_kwargs={"k": 3})
 

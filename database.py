@@ -3,9 +3,15 @@ import bcrypt
 import os
 import secrets
 
+# --- UNIFIED PATH CONFIGURATION ---
+# Get the directory of the current script
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# Default to a local 'data' folder inside your project
+LOCAL_DATA_PATH = os.path.join(APP_DIR, "data")
+# Use the production path if the environment variable is set, otherwise use the local default
+PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", LOCAL_DATA_PATH)
+
 # --- Constants ---
-# The user database will be stored on the persistent disk
-PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", "/data")
 DB_PATH = os.path.join(PERSISTENT_DISK_PATH, "users.db")
 
 def create_user_table():

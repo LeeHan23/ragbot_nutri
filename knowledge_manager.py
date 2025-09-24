@@ -5,21 +5,17 @@ from dotenv import load_dotenv
 # --- Load environment variables from .env file FIRST ---
 load_dotenv()
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
 from fastapi import UploadFile
 from uploader import save_uploaded_file_as_text
-import chromadb # Import the base chromadb library
-from langchain_chroma import Chroma # <-- UPDATED IMPORT
+import chromadb
 
 # --- UNIFIED PATH CONFIGURATION ---
-# This new section ensures paths are consistent across local dev and production.
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-# Default local data path is a 'data' folder in your project root
 LOCAL_DATA_PATH = os.path.join(APP_DIR, "data")
-# Use Render's persistent disk path if available, otherwise use the local path
 PERSISTENT_DISK_PATH = os.environ.get("PERSISTENT_DISK_PATH", LOCAL_DATA_PATH)
 
 # --- Constants ---
@@ -33,25 +29,33 @@ INSTRUCTIONS_PATH = os.path.join(APP_DIR, "data", "instructions")
 
 # --- KNOWLEDGE BASE MANAGEMENT ---
 
-def add_pdf_to_base_db(pdf_path: str):
+def add_document_to_base_db(doc_path: str):
     """
-    Processes a single PDF file and adds its content to the existing
+    Processes a single PDF or DOCX file and adds its content to the existing
     foundational knowledge base. This is an incremental update.
     """
-    if not os.path.exists(pdf_path):
-        print(f"Error: The file '{pdf_path}' was not found.")
+    if not os.path.exists(doc_path):
+        print(f"Error: The file '{doc_path}' was not found.")
         return False
 
     if not os.path.exists(BASE_DB_PATH):
         print(f"Error: Base vector store at '{BASE_DB_PATH}' does not exist. Please build it first.")
         return False
 
-    print(f"--- Starting incremental update for: {os.path.basename(pdf_path)} ---")
+    print(f"--- Starting incremental update for: {os.path.basename(doc_path)} ---")
     try:
-        loader = PyMuPDFLoader(pdf_path)
+        # --- NEW: Use the correct loader based on file extension ---
+        if doc_path.endswith(".pdf"):
+            loader = PyMuPDFLoader(doc_path)
+        elif doc_path.endswith(".docx"):
+            loader = Docx2txtLoader(doc_path)
+        else:
+            print(f"Error: Unsupported file type for knowledge base: {doc_path}")
+            return False
+            
         documents = loader.load()
         if not documents:
-            print("Warning: The PDF document appears to be empty or could not be loaded.")
+            print("Warning: The document appears to be empty or could not be loaded.")
             return False
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -64,14 +68,12 @@ def add_pdf_to_base_db(pdf_path: str):
 
         embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002")
         
-        # Load the existing vector store
         vector_store = Chroma(
             persist_directory=BASE_DB_PATH,
             embedding_function=embedding_function,
             collection_name=BASE_COLLECTION_NAME
         )
         
-        # Add the new document chunks
         vector_store.add_documents(chunks)
         
         print("✅ Incremental update complete.")
@@ -80,7 +82,7 @@ def add_pdf_to_base_db(pdf_path: str):
         print(f"An error occurred during the incremental update: {e}")
         return False
 
-def build_user_database(user_id: str, uploaded_docx_files: list, status_callback=None):
+def build_user_database(user_id: str, uploaded_files: list, status_callback=None):
     """
     Builds a user-specific knowledge base from uploaded .docx files.
     """
@@ -91,7 +93,6 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     user_db_path = os.path.join(USER_DB_PATH, user_id)
     if status_callback: status_callback(f"Preparing to build knowledge base for user '{user_id}'...")
 
-    # Safely remove old database before creating a new one
     if os.path.exists(user_db_path):
         if status_callback: status_callback("Clearing old custom knowledge base...")
         shutil.rmtree(user_db_path)
@@ -99,26 +100,30 @@ def build_user_database(user_id: str, uploaded_docx_files: list, status_callback
     os.makedirs(user_db_path, exist_ok=True)
     
     all_docs = []
-    # Create a temporary directory inside the user's db path to avoid conflicts
     temp_dir = os.path.join(user_db_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
 
-    for file_obj in uploaded_docx_files:
+    for file_obj in uploaded_files:
         try:
             temp_file_path = os.path.join(temp_dir, file_obj.name)
             
-            # uploaded_docx_files from streamlit are BytesIO objects
             with open(temp_file_path, "wb") as f:
                 f.write(file_obj.getbuffer())
 
-            loader = Docx2txtLoader(temp_file_path)
+            # Determine loader based on file type for user DBs too
+            if temp_file_path.endswith(".docx"):
+                loader = Docx2txtLoader(temp_file_path)
+            elif temp_file_path.endswith(".pdf"):
+                 loader = PyMuPDFLoader(temp_file_path)
+            else:
+                continue # Skip unsupported files
+
             all_docs.extend(loader.load())
 
         except Exception as e:
             if status_callback: status_callback(f"Error loading file {file_obj.name}: {e}")
             continue
     
-    # Clean up the temporary directory
     shutil.rmtree(temp_dir)
 
     if not all_docs:
@@ -155,8 +160,6 @@ def save_instruction_file(user_id: str, uploaded_file: UploadFile):
     os.makedirs(user_instructions_dir, exist_ok=True)
     
     try:
-        # Use the uploader utility to handle file processing
-        # This assumes uploader.py's save_uploaded_file_as_text is available and works with FastAPI's UploadFile
         saved_path = save_uploaded_file_as_text(uploaded_file, user_instructions_dir)
         return saved_path
         

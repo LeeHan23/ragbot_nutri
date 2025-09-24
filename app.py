@@ -11,7 +11,7 @@ import uvicorn
 
 # Import routers from other modules
 from admin import admin_router
-# from whatsapp_adapter import whatsapp_router # <-- TEMPORARILY COMMENTED OUT
+from whatsapp_adapter import whatsapp_router # <-- 1. This line must be active
 
 # Create the FastAPI application
 app = FastAPI(
@@ -21,7 +21,7 @@ app = FastAPI(
 )
 
 # --- Directory Setup ---
-# Ensure data directories exist on startup
+# (This part of your file remains the same)
 @app.on_event("startup")
 async def startup_event():
     """
@@ -30,10 +30,10 @@ async def startup_event():
     print("Application starting up...")
     base_dir = os.path.dirname(os.path.abspath(__file__))
     data_paths = {
-        "base_documents": os.path.join(base_dir, "data", "base_documents"),
-        "promos": os.path.join(base_dir, "data", "promos"),
-        "instructions": os.path.join(base_dir, "data", "instructions"),
-        "sessions": os.path.join(base_dir, "data", "sessions") 
+        "knowledge": os.path.join(base_dir, "data/knowledge"),
+        "promos": os.path.join(base_dir, "data/promos"),
+        "instructions": os.path.join(base_dir, "data/instructions"),
+        "sessions": os.path.join(base_dir, "data/sessions")
     }
     for name, path in data_paths.items():
         if not os.path.exists(path):
@@ -44,8 +44,7 @@ async def startup_event():
 
 # --- Include Routers ---
 app.include_router(admin_router, prefix="/admin", tags=["Admin"])
-# app.include_router(whatsapp_router, prefix="/whatsapp", tags=["WhatsApp"]) # <-- TEMPORARILY COMMENTED OUT
-print("NOTE: WhatsApp router is currently disabled for testing.")
+app.include_router(whatsapp_router, prefix="/whatsapp", tags=["WhatsApp"]) # <-- 2. This line must be active
 
 
 # --- Root Endpoint ---
