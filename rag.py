@@ -1,25 +1,24 @@
 import os
+import json
 import asyncio
+from datetime import datetime
 from dotenv import load_dotenv
-
-# --- Load environment variables from .env file FIRST ---
-load_dotenv()
 
 from typing import Dict, Any, List
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.retrievers import BaseRetriever # <-- 1. IMPORT THE BASE CLASS
-from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain_core.messages import AIMessage
+from langchain_core.retrievers import BaseRetriever
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
 
-# Import functions from other modules
 from vector_store import get_base_retriever, get_user_retriever
 from llm import get_llm
 from knowledge_manager import get_prompts
+# --- NEW: Import the agent tools ---
+from agent_tools import log_customer_data, generate_progress_report
 
-# (Your CORE_BEHAVIOR_INSTRUCTIONS and RAG_PROMPT_TEMPLATE remain the same)
+# (Your CORE_BEHAVIOR_INSTRUCTIONS remains the same)
 CORE_BEHAVIOR_INSTRUCTIONS = """
 **1. Your Persona: "Eva" - The Expert Nutrition Consultant**
 You are "Eva," a professional, empathetic, and highly skilled nutrition consultant. Your primary role is to build trust by providing valuable, free nutritional guidance based on the user's questions and the provided knowledge base. Your secondary goal is to identify users who would benefit from a deeper, one-on-one engagement and guide them towards booking a consultation.
@@ -46,8 +45,9 @@ Your conversations should follow a natural progression:
 * **Use Emojis & Bolding:** Add warmth and clarity with emojis (👋, 😊, ✨) and bolding (*key info*).
 * **End with a Question:** Keep the conversation moving by ending with a question.
 """
+# --- REVISED RAG PROMPT FOR AGENTIC BEHAVIOR ---
 RAG_PROMPT_TEMPLATE = """
-**Role:** You are "Eva," a world-class AI nutrition and dietetics consultant. Your goal is to have a caring, human-like conversation that feels like talking to a real nutritionist.
+**Role:** You are "Eva," a world-class AI nutrition consultant and health coach. You can chat, provide advice, and also help customers track their health progress.
 
 **Core Persona & Sales Instructions (Follow these ALWAYS):**
 {core_instructions}
@@ -56,11 +56,31 @@ RAG_PROMPT_TEMPLATE = """
 {custom_instructions}
 
 ---
-**CONVERSATIONAL ADIME FRAMEWORK (Your secret thought process):**
-Your goal is to follow the ADIME process, but you must do it conversationally, over multiple turns. **DO NOT output a long report.** Your primary objective is to build rapport and gather information naturally.
+**PRIMARY OBJECTIVE: TOOL USE FOR PROGRESS TRACKING**
+Your most important new task is to identify when a customer is providing a health update. If their message contains a specific metric (like weight, blood sugar, etc.), you MUST use your tools to log it.
 
+**Available Tools:**
+1.  `log_customer_data(customer_contact: str, user_id: str, metric_name: str, metric_value: str, notes: str)`: Use this to record a data point. `customer_contact` is the customer's unique identifier. `user_id` is the business account this customer belongs to.
+2.  `generate_progress_report(customer_contact: str, user_id: str)`: Use this if the customer asks for a summary of their progress.
+
+**How to Use Tools:**
+When you need to use a tool, you MUST respond with ONLY a JSON object in the following format:
+`{{"tool_name": "function_name", "parameters": {{"arg1": "value1", ...}}}}`
+
+**Tool-Use Examples:**
+* User says: "Hi Eva, just wanted to let you know I weighed myself this morning and I'm 82.5kg!"
+    * *Your thought process:* "The user is providing a weight update. I must log this."
+    * *Your response:* `{{"tool_name": "log_customer_data", "parameters": {{"customer_contact": "{customer_contact}", "user_id": "{user_id}", "metric_name": "Weight", "metric_value": "82.5kg", "notes": "Morning weigh-in"}}}}`
+* User asks: "How have I been doing over the last month?"
+    * *Your thought process:* "The user wants a summary. I need to generate a report."
+    * *Your response:* `{{"tool_name": "generate_progress_report", "parameters": {{"customer_contact": "{customer_contact}", "user_id": "{user_id}"}}}}`
+
+If the user is NOT providing a trackable update or asking for a report, then proceed with the Conversational ADIME Framework below.
+---
+**CONVERSATIONAL ADIME FRAMEWORK (Your secret thought process):**
+(This section remains the same for conversational chat)
 **1. ASSESSMENT PHASE (Your current primary focus):**
-* **Acknowledge and Empathize:** Start by acknowledging the user's situation and showing empathy.
+* **Acknowledge and Empathize:** Start by acknowledging the user's situation and showing empathy. The user may have sent several rapid messages; treat their combined input as a single, complete thought.
 * **Mirror Tone:** Adapt your style to match the user's. If they are casual, you are casual.
 * **Ask ONE Key Question:** Based on the user's message, identify the SINGLE most important piece of missing information (from the 'ABCD's of assessment) and ask for it in a friendly, conversational way.
 * **Your Goal for this Turn:** Your entire response should be short, caring, and focused on asking just one or two initial questions to get the conversation started.
@@ -74,7 +94,7 @@ Your goal is to follow the ADIME process, but you must do it conversationally, o
 {context}
 
 ---
-[CURRENT CONversation (Your short-term memory)]
+[CURRENT CONVERSATION (Your short-term memory)]
 {chat_history}
 
 ---
@@ -82,104 +102,108 @@ Your goal is to follow the ADIME process, but you must do it conversationally, o
 Question: {question}
 
 ---
-[YOUR SHORT, CARING, AND CONVERSATIONAL RESPONSE]
+[YOUR RESPONSE (Either a JSON tool call or a conversational message)]
 """
 
-# (format_chat_history remains the same)
 def format_chat_history(chat_history: list) -> str:
     if not chat_history: return "No conversation history yet."
     messages = [f"{msg['role'].capitalize()}: {msg['content']}" for msg in chat_history]
     return "\n".join(messages)
 
-# --- 2. UPDATE THE PASSTHROUGH RETRIEVER CLASS ---
-# This custom retriever class now inherits from BaseRetriever, making it compatible
-# with the rest of the LangChain framework.
 class PassthroughRetriever(BaseRetriever):
     docs: List[Document]
-    
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        return self.docs
-    
-    async def _aget_relevant_documents(self, query: str) -> List[Document]:
-        return self.docs
+    def _get_relevant_documents(self, query: str) -> List[Document]: return self.docs
+    async def _aget_relevant_documents(self, query: str) -> List[Document]: return self.docs
 
-async def get_contextual_response(user_question: str, chat_history: list, user_id: str) -> Dict[str, Any]:
+async def get_contextual_response(user_question: str, chat_history: list, user_id: str, customer_contact: str) -> Dict[str, Any]:
     """
-    Generates a contextual response by augmenting foundational knowledge with user-specific knowledge.
-    This version uses parallel retrieval and contextual compression for speed and accuracy.
+    This function now acts as an agent executor. It can chat, use tools, or retrieve information.
     """
-    try:
-        print(f"--- Invoking Optimized RAG Chain for user: {user_id} ---")
-        llm = get_llm()
-        
-        # --- 1. Get Retrievers ---
-        base_retriever = get_base_retriever()
-        user_retriever = get_user_retriever(user_id)
+    print(f"--- Invoking Agent Chain for user: {user_id}, customer: {customer_contact} ---")
+    llm = get_llm()
+    
+    # --- 1. First LLM call to decide if a tool is needed ---
+    custom_instructions, _ = get_prompts(user_id=user_id)
+    formatted_history = format_chat_history(chat_history)
+    
+    agent_prompt_template = PromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
+    agent_prompt = agent_prompt_template.format(
+        core_instructions=CORE_BEHAVIOR_INSTRUCTIONS,
+        custom_instructions=custom_instructions,
+        context="No context needed for this step.",
+        chat_history=formatted_history,
+        question=user_question,
+        customer_contact=customer_contact, # Pass IDs to the prompt
+        user_id=user_id
+    )
+    
+    initial_response = await llm.ainvoke(agent_prompt)
+    response_text = initial_response.content.strip()
 
-        # --- 2. Asynchronous Parallel Retrieval ---
-        retrieval_tasks = [base_retriever.ainvoke(user_question)]
-        knowledge_source = "Foundational"
-        if user_retriever:
-            retrieval_tasks.append(user_retriever.ainvoke(user_question))
-            knowledge_source = "Custom + Foundational"
-        
-        print("Searching in parallel across knowledge bases...")
-        all_results = await asyncio.gather(*retrieval_tasks)
-        
-        all_retrieved_docs = [doc for sublist in all_results for doc in sublist]
+    # --- 2. Check if the response is a tool call ---
+    if response_text.startswith('{') and response_text.endswith('}'):
+        try:
+            tool_call = json.loads(response_text)
+            tool_name = tool_call.get("tool_name")
+            parameters = tool_call.get("parameters", {})
+            
+            print(f"Executing tool: {tool_name} with params: {parameters}")
 
-        # --- 3. De-duplicate and Compress Context ---
-        unique_docs = list({doc.page_content: doc for doc in all_retrieved_docs}.values())
+            if tool_name == "log_customer_data":
+                result = log_customer_data(**parameters)
+            elif tool_name == "generate_progress_report":
+                result = generate_progress_report(**parameters)
+            else:
+                result = "Unknown tool."
+            
+            # --- 3. Second LLM call to convert tool result into a natural response ---
+            second_prompt = f"The user's last message was: '{user_question}'. You used the tool '{tool_name}' and got this result: '{result}'. Now, provide a short, friendly, and encouraging response to the user based on this result. For example, if data was logged successfully, say something like 'That's great, I've logged that for you! Keep up the amazing work!'"
+            final_response = await llm.ainvoke(second_prompt)
+            
+            return { "answer": final_response.content, "sources": [], "knowledge_source": "Agent Tool" }
 
-        if not unique_docs:
-            print("No relevant documents found in any knowledge base.")
-            context = "No information found on this topic."
-            final_docs = []
-        else:
-            # Create an instance of our now-valid PassthroughRetriever
-            combined_retriever = PassthroughRetriever(docs=unique_docs)
+        except json.JSONDecodeError:
+            pass # Not a valid tool call, proceed to RAG
 
-            print("Compressing combined context for relevance...")
-            compressor = LLMChainExtractor.from_llm(llm)
-            compression_retriever = ContextualCompressionRetriever(
-                base_compressor=compressor,
-                base_retriever=combined_retriever
-            )
-            final_docs = await compression_retriever.ainvoke(user_question)
+    # --- If not a tool call, proceed with the original RAG process ---
+    base_retriever = get_base_retriever()
+    user_retriever = get_user_retriever(user_id)
+    retrieval_tasks = [base_retriever.ainvoke(user_question)]
+    knowledge_source = "Foundational"
+    if user_retriever:
+        retrieval_tasks.append(user_retriever.ainvoke(user_question))
+        knowledge_source = "Custom + Foundational"
+    
+    all_results = await asyncio.gather(*retrieval_tasks)
+    all_retrieved_docs = [doc for sublist in all_results for doc in sublist]
+    unique_docs = list({doc.page_content: doc for doc in all_retrieved_docs}.values())
+    
+    if not unique_docs:
+        context = "No information found on this topic."
+        final_docs = []
+    else:
+        combined_retriever = PassthroughRetriever(docs=unique_docs)
+        compressor = LLMChainExtractor.from_llm(llm)
+        compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=combined_retriever)
+        final_docs = await compression_retriever.ainvoke(user_question)
+        context_parts = [f"Source: {os.path.basename(doc.metadata.get('source', 'Unknown'))}, Page: {doc.metadata.get('page', 'N/A')}\nContent: {doc.page_content}" for doc in final_docs]
+        context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant information found after compression."
 
-            context_parts = []
-            for doc in final_docs:
-                source = os.path.basename(doc.metadata.get("source", "Unknown"))
-                page = doc.metadata.get("page", "N/A")
-                context_part = f"Source: {source}, Page: {page}\nContent: {doc.page_content}"
-                context_parts.append(context_part)
-            context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant information found after compression."
-
-        # --- The rest of the chain proceeds as before ---
-        custom_instructions, _ = get_prompts(user_id=user_id)
-        formatted_history = format_chat_history(chat_history)
-        
-        prompt_template = PromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
-        final_prompt = prompt_template.format(
-            core_instructions=CORE_BEHAVIOR_INSTRUCTIONS,
-            custom_instructions=custom_instructions,
-            context=context,
-            chat_history=formatted_history,
-            question=user_question
-        )
-        
-        response = await llm.ainvoke(final_prompt)
-        
-        return {
-            "answer": response.content,
-            "sources": final_docs,
-            "knowledge_source": knowledge_source
-        }
-
-    except FileNotFoundError as e:
-        print(f"FileNotFoundError in RAG chain: {e}")
-        return {"answer": "The foundational knowledge base is missing. Please contact the administrator.", "sources": [], "knowledge_source": "Error"}
-    except Exception as e:
-        print(f"ERROR in get_contextual_response: {e}")
-        return {"answer": "I'm sorry, an unexpected error occurred. Please try again later.", "sources": [], "knowledge_source": "Error"}
+    final_prompt_rag = agent_prompt_template.format(
+        core_instructions=CORE_BEHAVIOR_INSTRUCTIONS,
+        custom_instructions=custom_instructions,
+        context=context,
+        chat_history=formatted_history,
+        question=user_question,
+        customer_contact=customer_contact,
+        user_id=user_id
+    )
+    
+    final_response_rag = await llm.ainvoke(final_prompt_rag)
+    
+    return {
+        "answer": final_response_rag.content,
+        "sources": final_docs,
+        "knowledge_source": knowledge_source
+    }
 
